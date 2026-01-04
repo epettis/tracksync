@@ -12,11 +12,15 @@ def calculate_speed_ratios(
     """
     Calculate speed ratios needed to sync target video to reference.
 
-    The ratio represents how much to speed up or slow down the target video
+    The ratio represents how much to scale the target video's playback speed
     to match the reference video's timing at each segment:
-    - ratio > 1.0: Target is slower, needs to speed up
-    - ratio < 1.0: Target is faster, needs to slow down
+    - ratio > 1.0: Target is faster, needs to slow down (longer duration)
+    - ratio < 1.0: Target is slower, needs to speed up (shorter duration)
     - ratio = 1.0: Same speed, no adjustment needed
+
+    Example: Target takes 10s, reference takes 15s for a segment.
+    - ratio = 10/15 = 0.67
+    - with_speed_scaled(0.67) slows target so 10s becomes 15s
 
     Args:
         target_segments: Segments from the video to be adjusted
@@ -47,7 +51,7 @@ def calculate_speed_ratios(
                 f"Invalid target duration at segment {i}: {target_duration}"
             )
 
-        ratio = ref_duration / target_duration
+        ratio = target_duration / ref_duration
         ratios.append(ratio)
 
     return ratios

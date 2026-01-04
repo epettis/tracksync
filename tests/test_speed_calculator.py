@@ -17,8 +17,8 @@ class TestCalculateSpeedRatios:
         ratios = calculate_speed_ratios(segments, segments)
         assert ratios == [1.0, 1.0]
 
-    def test_slower_target_gives_ratio_greater_than_one(self):
-        """When target is slower, ratio > 1 to speed it up."""
+    def test_slower_target_gives_ratio_less_than_one(self):
+        """When target is slower, ratio < 1 to speed it up."""
         target = [
             Segment("Start", 0.0, 100.0),
             Segment("Finish", 10.0, 100.0),  # 10s duration
@@ -28,10 +28,10 @@ class TestCalculateSpeedRatios:
             Segment("Finish", 15.0, 100.0),  # 15s duration
         ]
         ratios = calculate_speed_ratios(target, reference)
-        assert ratios == [1.5]  # 15/10 = 1.5
+        assert ratios == [pytest.approx(10 / 15)]  # 10/15 = 0.67
 
-    def test_faster_target_gives_ratio_less_than_one(self):
-        """When target is faster, ratio < 1 to slow it down."""
+    def test_faster_target_gives_ratio_greater_than_one(self):
+        """When target is faster, ratio > 1 to slow it down."""
         target = [
             Segment("Start", 0.0, 100.0),
             Segment("Finish", 20.0, 100.0),  # 20s duration
@@ -41,15 +41,15 @@ class TestCalculateSpeedRatios:
             Segment("Finish", 10.0, 100.0),  # 10s duration
         ]
         ratios = calculate_speed_ratios(target, reference)
-        assert ratios == [0.5]  # 10/20 = 0.5
+        assert ratios == [2.0]  # 20/10 = 2.0
 
     def test_multiple_segments(self, sample_segments, reference_segments):
         """Test with multiple segments."""
         ratios = calculate_speed_ratios(sample_segments, reference_segments)
         assert len(ratios) == 3
-        assert ratios[0] == pytest.approx(1.5)  # 15/10
+        assert ratios[0] == pytest.approx(10 / 15)  # 10/15 = 0.67
         assert ratios[1] == pytest.approx(1.0)  # 10/10
-        assert ratios[2] == pytest.approx(1.5)  # 15/10
+        assert ratios[2] == pytest.approx(10 / 15)  # 10/15 = 0.67
 
     def test_segment_count_mismatch_raises(self):
         """Mismatched segment counts should raise ValueError."""

@@ -27,21 +27,21 @@ class TestEndToEndWithSyntheticClips:
             driver="Reference",
             segments=[
                 Segment("Start", 0.0, 95.0),
-                Segment("T1", 15.0, 75.0),  # ratio = 1.5
-                Segment("Finish", 30.0, 95.0),  # ratio = 1.5
+                Segment("T1", 15.0, 75.0),  # ratio = 10/15 = 0.67
+                Segment("Finish", 30.0, 95.0),  # ratio = 10/15 = 0.67
             ],
         )
 
         # Calculate speed ratios
         ratios = calculate_speed_ratios(target.segments, reference.segments)
-        assert ratios == [pytest.approx(1.5), pytest.approx(1.5)]
+        assert ratios == [pytest.approx(10 / 15), pytest.approx(10 / 15)]
 
         # Build processed segments
         processed = build_processed_segments(target.segments, ratios)
         assert len(processed) == 2
         assert processed[0].start_time == 0.0
         assert processed[0].end_time == 10.0
-        assert processed[0].speed_ratio == pytest.approx(1.5)
+        assert processed[0].speed_ratio == pytest.approx(10 / 15)
 
         # Create mock video loader
         def mock_loader(filepath):
@@ -54,8 +54,8 @@ class TestEndToEndWithSyntheticClips:
         result = processor.process_segments(clip, processed)
 
         # Original segments: 10s + 10s = 20s
-        # After speedup: 10/1.5 + 10/1.5 = 6.67 + 6.67 = 13.33s
-        expected = (10 / 1.5) + (10 / 1.5)
+        # After slowdown with ratio 0.67: 10/0.67 + 10/0.67 = 15 + 15 = 30s
+        expected = (10 / (10 / 15)) + (10 / (10 / 15))
         assert result.duration == pytest.approx(expected, abs=0.5)
 
     def test_stacked_output_dimensions(self):
@@ -87,19 +87,19 @@ class TestEndToEndWithSyntheticClips:
             driver="SlowDriver",
             segments=[
                 Segment("Start", 0.0, 95.0),
-                Segment("Turn1", 12.0, 80.0),  # 12 seconds (ratio = 1.5)
-                Segment("Turn2", 22.0, 85.0),  # 10 seconds (ratio = 1.0)
-                Segment("Finish", 37.0, 95.0),  # 15 seconds (ratio = 1.5)
+                Segment("Turn1", 12.0, 80.0),  # 12 seconds (ratio = 8/12 = 0.67)
+                Segment("Turn2", 22.0, 85.0),  # 10 seconds (ratio = 10/10 = 1.0)
+                Segment("Finish", 37.0, 95.0),  # 15 seconds (ratio = 10/15 = 0.67)
             ],
         )
 
         # Calculate ratios
         ratios = calculate_speed_ratios(target.segments, reference.segments)
 
-        # Verify ratios
-        assert ratios[0] == pytest.approx(12.0 / 8.0)  # 1.5
+        # Verify ratios (target_duration / ref_duration)
+        assert ratios[0] == pytest.approx(8.0 / 12.0)  # 0.67
         assert ratios[1] == pytest.approx(10.0 / 10.0)  # 1.0
-        assert ratios[2] == pytest.approx(15.0 / 10.0)  # 1.5
+        assert ratios[2] == pytest.approx(10.0 / 15.0)  # 0.67
 
         # Build processed segments
         processed = build_processed_segments(target.segments, ratios)
@@ -129,8 +129,8 @@ class TestEndToEndWithSyntheticClips:
 
         # Verify target processing duration
         # Original: 8 + 10 + 10 = 28s
-        # After scaling: 8/1.5 + 10/1.0 + 10/1.5 = 5.33 + 10 + 6.67 = 22s
-        expected_target_duration = (8 / 1.5) + (10 / 1.0) + (10 / 1.5)
+        # After scaling: 8/(8/12) + 10/1.0 + 10/(10/15) = 12 + 10 + 15 = 37s
+        expected_target_duration = (8 / (8 / 12)) + (10 / 1.0) + (10 / (10 / 15))
         assert processed_target.duration == pytest.approx(expected_target_duration, abs=0.5)
 
         # Verify reference duration (37 - 0 = 37s)
@@ -154,11 +154,11 @@ class TestEndToEndWithSyntheticClips:
             ],
         )
 
-        # A as target, B as reference
+        # A as target, B as reference (A: 10s, B: 15s)
         ratios_a_vs_b = calculate_speed_ratios(driver_a.segments, driver_b.segments)
-        # B as target, A as reference
+        # B as target, A as reference (B: 15s, A: 10s)
         ratios_b_vs_a = calculate_speed_ratios(driver_b.segments, driver_a.segments)
 
         # Ratios should be reciprocals
-        assert ratios_a_vs_b[0] == pytest.approx(1.5)  # 15/10
-        assert ratios_b_vs_a[0] == pytest.approx(1 / 1.5)  # 10/15
+        assert ratios_a_vs_b[0] == pytest.approx(10 / 15)  # 0.67 - slow down A to match B
+        assert ratios_b_vs_a[0] == pytest.approx(15 / 10)  # 1.5 - speed up B to match A

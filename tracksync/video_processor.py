@@ -53,11 +53,12 @@ class VideoProcessor:
         - with_speed_scaled(2) makes video play 2x faster (shorter duration)
         - with_speed_scaled(0.5) makes video play at half speed (longer duration)
 
-        Our ratio is: ref_duration / my_duration
-        - ratio > 1: I am slower, need to speed up my video
-        - ratio < 1: I am faster, need to slow down my video
+        Our ratio is: target_duration / ref_duration
+        - ratio > 1: Target is faster, slow it down to match reference
+        - ratio < 1: Target is slower, speed it up to match reference
 
-        So with_speed_scaled(ratio) is the correct application.
+        Example: Target 10s, reference 15s → ratio = 10/15 = 0.67
+        with_speed_scaled(0.67) slows target from 10s to 15s.
         """
         return clip.with_speed_scaled(speed_ratio)
 
