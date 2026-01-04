@@ -15,15 +15,16 @@ from collections import namedtuple
 
 Segment = namedtuple('Segment', ['title', 'timestamp', 'speed'])
 
+
 class Video:
     def __init__(self, driver):
         self.driver = driver
         self.segments = []
 
-    def AddSegment(self, segment):
+    def add_segment(self, segment):
         self.segments.append(segment)
 
-    def GenerateSpeedFilter(self, reference):
+    def generate_speed_filter(self, reference):
         assert len(self.segments) == len(reference.segments)
         scales = []
         for i in range(1, len(self.segments)):
@@ -59,7 +60,7 @@ class Video:
             vf += f'setpts={r:.4f}*(PTS-STARTPTS)[v{i}];\n'
 
         f = vf + af
-        
+
         # Now concatenate all the segments to the label [v1out].
         concat = ''.join([f'[v{i}]' for i in range(1, len(self.segments))])
         f += concat + f'concat=n={len(self.segments)-1}:v=1:a=0[v1out];\n'
@@ -72,10 +73,10 @@ class Video:
 
         # Now vertically stack the processed videos.
         f += f'[v1out][v2out]vstack'
-        
+
         return f
 
-    
+
 def read_csv(csv_filename):
     videos = []
     with open(csv_filename, 'r') as csvfile:
@@ -98,12 +99,12 @@ def read_csv(csv_filename):
             for i in range(num_drivers):
                 segment = Segment(segment_title, float(row[2*i + 1]),
                                   float(row[2*i + 2]))
-                videos[i].AddSegment(segment)
+                videos[i].add_segment(segment)
     return videos
 
 
 def generate(video0, video1):
-    ftr = video0.GenerateSpeedFilter(video1)
+    ftr = video0.generate_speed_filter(video1)
 
     d0 = video0.driver
     d1 = video1.driver
@@ -111,12 +112,12 @@ def generate(video0, video1):
     cmd = (f'ffmpeg -y -i ./{d0}.mp4 -i ./{d1}.mp4 ' +
            f'-filter_complex "{ftr}" -map "[a2out]:a" ./{output_filename}')
     os.system(cmd)
-    
+
 
 def main(argv):
     csv_filename = argv[1]
     videos = read_csv(csv_filename)
-    
+
     for v0 in videos:
         for v1 in videos:
             if v0.driver != v1.driver:
