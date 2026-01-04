@@ -6,7 +6,10 @@ from typing import Optional
 
 from .csv_reader import read_csv
 from .models import VideoMetadata
-from .speed_calculator import build_processed_segments, calculate_speed_ratios
+from .segment_validator import (
+    build_processed_segments_with_clamping,
+    clamp_segments,
+)
 from .video_processor import VideoProcessor
 
 
@@ -20,6 +23,9 @@ def generate_comparison(
     """
     Generate a comparison video between target and reference.
 
+    Handles CSV timestamps that exceed video duration by clamping them
+    and using freeze frames when necessary.
+
     Args:
         target: Video to be speed-adjusted
         reference: Reference video (unchanged)
@@ -32,20 +38,39 @@ def generate_comparison(
     """
     processor = processor or VideoProcessor()
 
-    # Calculate speed ratios
-    ratios = calculate_speed_ratios(target.segments, reference.segments)
-    processed_segments = build_processed_segments(target.segments, ratios)
-
-    # Load source videos
+    # Load source videos FIRST (need duration for clamping)
     target_clip = processor.load_video(str(video_dir / f"{target.driver}.mp4"))
     reference_clip = processor.load_video(str(video_dir / f"{reference.driver}.mp4"))
 
-    # Process target video (trim, speed adjust, concatenate)
+    # Clamp segments to video duration
+    clamped_target, target_warnings = clamp_segments(
+        target.segments, target_clip.duration
+    )
+    clamped_reference, ref_warnings = clamp_segments(
+        reference.segments, reference_clip.duration
+    )
+
+    # Log warnings
+    for warning in target_warnings:
+        print(f"Warning ({target.driver}): {warning}")
+    for warning in ref_warnings:
+        print(f"Warning ({reference.driver}): {warning}")
+
+    # Calculate speed ratios with freeze frame detection
+    processed_segments = build_processed_segments_with_clamping(
+        clamped_target,
+        clamped_reference,
+        target_clip.duration,
+        reference_clip.duration,
+    )
+
+    # Process target video (trim, speed adjust, concatenate, or freeze frames)
     processed_target = processor.process_segments(target_clip, processed_segments)
 
     # Extract reference segment (first to last timestamp, no speed change)
-    ref_start = reference.segments[0].timestamp
-    ref_end = reference.segments[-1].timestamp
+    # Clamp reference timestamps as well
+    ref_start = min(clamped_reference[0].clamped_timestamp, reference_clip.duration)
+    ref_end = min(clamped_reference[-1].clamped_timestamp, reference_clip.duration)
     processed_reference = processor.extract_reference_segment(
         reference_clip, ref_start, ref_end
     )

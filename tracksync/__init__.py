@@ -4,6 +4,11 @@ from .models import Segment, VideoMetadata, ProcessedSegment
 from .speed_calculator import calculate_speed_ratios, build_processed_segments
 from .csv_reader import read_csv
 from .video_processor import VideoProcessor
+from .segment_validator import (
+    ClampedSegment,
+    clamp_segments,
+    build_processed_segments_with_clamping,
+)
 
 __all__ = [
     "Segment",
@@ -13,4 +18,7 @@ __all__ = [
     "build_processed_segments",
     "read_csv",
     "VideoProcessor",
+    "ClampedSegment",
+    "clamp_segments",
+    "build_processed_segments_with_clamping",
 ]

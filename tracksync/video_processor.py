@@ -5,6 +5,7 @@ from typing import Callable, List, Optional
 import numpy as np
 from moviepy import (
     ColorClip,
+    ImageClip,
     VideoClip,
     VideoFileClip,
     clips_array,
@@ -62,6 +63,32 @@ class VideoProcessor:
         """
         return clip.with_speed_scaled(speed_ratio)
 
+    def create_freeze_frame(
+        self,
+        clip: VideoFileClip,
+        frame_time: float,
+        duration: float,
+    ) -> VideoClip:
+        """
+        Create a static frame clip from the video.
+
+        Used when a segment extends beyond the video duration or when
+        a segment would have zero duration after clamping.
+
+        Args:
+            clip: Source video clip
+            frame_time: Time in the video to extract the frame from
+            duration: How long to display the freeze frame
+
+        Returns:
+            A VideoClip showing a single frame for the specified duration
+        """
+        # Ensure frame_time is within valid bounds
+        safe_time = max(0, min(frame_time, clip.duration - 0.01))
+        frame_array = clip.get_frame(safe_time)
+        fps = clip.fps if clip.fps else 24
+        return ImageClip(frame_array).with_duration(duration).with_fps(fps)
+
     def process_segments(
         self,
         clip: VideoFileClip,
@@ -70,18 +97,31 @@ class VideoProcessor:
         """
         Process all segments: trim, speed adjust, and concatenate.
 
+        Handles both normal segments (extracted and speed-adjusted) and
+        freeze frame segments (static image for specified duration).
+
         Args:
             clip: Source video clip
-            processed_segments: List of segments with speed ratios
+            processed_segments: List of segments with speed ratios or freeze frame info
 
         Returns:
             Concatenated video with all segments processed
         """
         segment_clips = []
         for seg in processed_segments:
-            trimmed = self.extract_segment(clip, seg.start_time, seg.end_time)
-            adjusted = self.apply_speed(trimmed, seg.speed_ratio)
-            segment_clips.append(adjusted)
+            if seg.is_freeze_frame:
+                # Create a static frame for this segment
+                freeze = self.create_freeze_frame(
+                    clip,
+                    seg.freeze_frame_time,
+                    seg.freeze_frame_duration,
+                )
+                segment_clips.append(freeze)
+            else:
+                # Normal segment processing
+                trimmed = self.extract_segment(clip, seg.start_time, seg.end_time)
+                adjusted = self.apply_speed(trimmed, seg.speed_ratio)
+                segment_clips.append(adjusted)
 
         return concatenate_videoclips(segment_clips, method="compose")
 
