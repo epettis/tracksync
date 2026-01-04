@@ -83,12 +83,15 @@ def build_processed_segments_with_clamping(
     reference_duration: float,
 ) -> List[ProcessedSegment]:
     """
-    Build processed segments with clamping and freeze frame detection.
+    Build processed segments with clamping.
 
     Handles edge cases:
     - Segment end_time > video duration: clamp to duration
-    - Segment becomes zero duration after clamping: use freeze frame
-    - Both target and reference are zero: use freeze frame
+    - Segment becomes zero duration after clamping: skip it (end video there)
+    - Reference zero duration: use 1.0 speed ratio
+
+    When CSV timestamps exceed video duration, the video ends at the actual
+    video duration - no freeze frames or audio continuation.
 
     Args:
         target_segments: Clamped segments from target video
@@ -97,7 +100,7 @@ def build_processed_segments_with_clamping(
         reference_duration: Actual duration of reference video
 
     Returns:
-        List of ProcessedSegment objects, some may be freeze frames
+        List of ProcessedSegment objects (only segments with positive duration)
     """
     if len(target_segments) != len(reference_segments):
         raise ValueError(
@@ -116,52 +119,23 @@ def build_processed_segments_with_clamping(
         target_seg_duration = target_end - target_start
         ref_seg_duration = ref_end - ref_start
 
-        # Determine if we need a freeze frame
-        needs_freeze_frame = False
-        freeze_frame_time = None
-        freeze_frame_duration = None
-
+        # Skip segments with zero or negative duration (beyond video end)
         if target_seg_duration <= 0:
-            # Target segment has no content, use freeze frame
-            needs_freeze_frame = True
-            # Use the last valid frame before this segment
-            freeze_frame_time = max(0, target_start - 0.01)
-            freeze_frame_time = min(freeze_frame_time, target_duration - 0.01)
-            # Duration should match reference timing
-            freeze_frame_duration = ref_seg_duration if ref_seg_duration > 0 else 1.0
+            continue
 
-        elif ref_seg_duration <= 0:
-            # Reference has no duration, can't calculate meaningful ratio
-            # Play target at 1x speed for a reasonable duration
-            needs_freeze_frame = False
-            # Use ratio of 1.0 (no speed change)
+        # Calculate speed ratio
+        if ref_seg_duration > 0:
+            speed_ratio = target_seg_duration / ref_seg_duration
+        else:
+            # Reference has no duration, use 1.0 (no speed change)
             speed_ratio = 1.0
 
-        if needs_freeze_frame:
-            processed.append(
-                ProcessedSegment(
-                    start_time=target_start,
-                    end_time=target_end,
-                    speed_ratio=0.0,  # Not used for freeze frames
-                    is_freeze_frame=True,
-                    freeze_frame_time=freeze_frame_time,
-                    freeze_frame_duration=freeze_frame_duration,
-                )
+        processed.append(
+            ProcessedSegment(
+                start_time=target_start,
+                end_time=target_end,
+                speed_ratio=speed_ratio,
             )
-        else:
-            # Normal segment processing
-            if ref_seg_duration > 0:
-                speed_ratio = target_seg_duration / ref_seg_duration
-            else:
-                speed_ratio = 1.0
-
-            processed.append(
-                ProcessedSegment(
-                    start_time=target_start,
-                    end_time=target_end,
-                    speed_ratio=speed_ratio,
-                    is_freeze_frame=False,
-                )
-            )
+        )
 
     return processed

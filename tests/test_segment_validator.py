@@ -86,8 +86,8 @@ class TestClampSegments:
 
 
 class TestBuildProcessedSegmentsWithClamping:
-    def test_normal_segments_no_freeze_frame(self):
-        """Valid segments get is_freeze_frame=False."""
+    def test_normal_segments(self):
+        """Valid segments are processed with correct speed ratios."""
         target_segments = [
             ClampedSegment(Segment("Start", 0.0, 100.0), 0.0, False, False),
             ClampedSegment(Segment("T1", 10.0, 80.0), 10.0, False, False),
@@ -104,12 +104,11 @@ class TestBuildProcessedSegmentsWithClamping:
         )
 
         assert len(processed) == 2
-        assert all(not p.is_freeze_frame for p in processed)
         assert processed[0].speed_ratio == pytest.approx(10.0 / 15.0)
         assert processed[1].speed_ratio == pytest.approx(10.0 / 15.0)
 
-    def test_beyond_video_segment_creates_freeze_frame(self):
-        """Segment beyond video creates freeze frame."""
+    def test_clamped_segment_still_has_duration(self):
+        """Segment clamped but still with positive duration is processed."""
         target_segments = [
             ClampedSegment(Segment("Start", 0.0, 100.0), 0.0, False, False),
             ClampedSegment(Segment("T1", 50.0, 80.0), 50.0, False, False),
@@ -126,14 +125,16 @@ class TestBuildProcessedSegmentsWithClamping:
         )
 
         assert len(processed) == 2
-        # First segment is normal
-        assert processed[0].is_freeze_frame is False
+        # First segment: 0-50 = 50s
+        assert processed[0].start_time == 0.0
+        assert processed[0].end_time == 50.0
         # Second segment: target 50-60 (10s), ref 50-70 (20s)
-        # Target has 10s of content, so it's a normal segment
-        assert processed[1].is_freeze_frame is False
+        assert processed[1].start_time == 50.0
+        assert processed[1].end_time == 60.0
+        assert processed[1].speed_ratio == pytest.approx(10.0 / 20.0)
 
-    def test_zero_duration_segment_creates_freeze_frame(self):
-        """Zero-duration clamped segment creates freeze frame."""
+    def test_zero_duration_segment_is_skipped(self):
+        """Zero-duration clamped segment is skipped (video ends there)."""
         target_segments = [
             ClampedSegment(Segment("Start", 0.0, 100.0), 0.0, False, False),
             ClampedSegment(Segment("T1", 60.0, 80.0), 60.0, True, True),  # At limit
@@ -149,13 +150,14 @@ class TestBuildProcessedSegmentsWithClamping:
             target_segments, ref_segments, 60.0, 80.0
         )
 
-        assert len(processed) == 2
-        # Second segment has zero target duration (60-60)
-        assert processed[1].is_freeze_frame is True
-        assert processed[1].freeze_frame_duration == 20.0  # ref 60-80
+        # Only first segment has positive duration (0-60)
+        # Second segment is 60-60 = 0 duration, so it's skipped
+        assert len(processed) == 1
+        assert processed[0].start_time == 0.0
+        assert processed[0].end_time == 60.0
 
-    def test_freeze_frame_duration_matches_reference(self):
-        """Freeze frame duration matches reference segment timing."""
+    def test_partial_segment_before_end(self):
+        """Segment with partial duration before video end is included."""
         target_segments = [
             ClampedSegment(Segment("Start", 55.0, 100.0), 55.0, False, False),
             ClampedSegment(Segment("End", 70.0, 100.0), 60.0, True, True),  # Clamped
@@ -170,8 +172,10 @@ class TestBuildProcessedSegmentsWithClamping:
         )
 
         # Target: 55-60 = 5s, Reference: 0-25 = 25s
-        # Not a freeze frame because target has positive duration
-        assert processed[0].is_freeze_frame is False
+        assert len(processed) == 1
+        assert processed[0].start_time == 55.0
+        assert processed[0].end_time == 60.0
+        assert processed[0].speed_ratio == pytest.approx(5.0 / 25.0)
 
     def test_segment_count_mismatch_raises(self):
         """Mismatched segment counts raise ValueError."""
@@ -200,5 +204,5 @@ class TestBuildProcessedSegmentsWithClamping:
         )
 
         # Reference has zero duration, so use ratio 1.0
+        assert len(processed) == 1
         assert processed[0].speed_ratio == 1.0
-        assert processed[0].is_freeze_frame is False
