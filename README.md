@@ -1,9 +1,9 @@
 # tracksync: Comparing your dashcam to their dashcam
 
-Tracksync is a simple wrapper around ffmpeg to autoscale video A to a reference
-video B by matching timestamps at various milestones. I use this script to
-compare my racing dashcam against my friends to determine how closely our lines
-match, despite differing overall lap times.
+Tracksync uses MoviePy to autoscale video A to a reference video B by matching
+timestamps at various milestones. I use this script to compare my racing dashcam
+against my friends to determine how closely our lines match, despite differing
+overall lap times.
 
 Tracksync scales the videos such that the cameras reach milestones (e.g., turn
 apexes) at the same time. Then, the videos are vertically stacked for comparison.
@@ -24,7 +24,50 @@ the first video. The fourth column is the basename of the second video, and so o
 After the header row, each consecutive row indicates the milestone name and the
 timestamp (in seconds) and speed (in mph) for each video.
 
-Usage: `./tracksync.py timestamps.csv`
+## Installation
+
+### Set up virtual environment
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate it
+source .venv/bin/activate
+
+# Install dependencies
+pip install moviepy
+
+# For development (includes testing tools)
+pip install moviepy pytest pytest-cov
+```
+
+### Activate/Deactivate
+
+```bash
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Deactivate when done
+deactivate
+```
+
+## Usage
+
+```bash
+# Make sure virtual environment is activated
+source .venv/bin/activate
+
+# Run tracksync
+python tracksync.py timestamps.csv
+```
 
 The script outputs videos in the form video1_vs_video2.mp4, where video1 is scaled
 to reference video2.
+
+## Running Tests
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=. pytest tests/ -v
+```
