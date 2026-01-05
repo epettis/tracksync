@@ -2,8 +2,8 @@
 """
 Video alignment utility for automatically syncing two racing videos.
 
-This tool uses autocorrelation of binarized frames to find matching
-timestamps between videos based on track overlay and car position markers.
+This tool uses cross-correlation of red dot positions on the track overlay
+to find matching timestamps between videos.
 
 Usage:
     python video_align.py video_a.mp4 video_b.mp4 --output timestamps.csv
@@ -14,6 +14,7 @@ import argparse
 import sys
 import cv2
 import numpy as np
+from dataclasses import dataclass
 from typing import Optional
 
 from tracksync.autocorrelation import (
@@ -28,6 +29,30 @@ from tracksync.autocorrelation import (
     AlignmentPoint,
     CorrelationResult,
 )
+
+
+@dataclass
+class FrameData:
+    """Pre-computed data for a single frame."""
+    time: float
+    frame: np.ndarray  # Original RGB frame
+    circle: Optional[tuple[int, int, int]]  # (x, y, radius) or None
+    segment: Optional[int]  # Segment number or None
+
+
+@dataclass
+class CrossCorrelationResult:
+    """Result of cross-correlating one frame against all frames in another video."""
+    time_a: float
+    frame_a: np.ndarray
+    circle_a: Optional[tuple[int, int, int]]
+    segment_a: Optional[int]
+    best_time_b: float
+    best_frame_b: np.ndarray
+    best_circle_b: Optional[tuple[int, int, int]]
+    best_segment_b: Optional[int]
+    best_distance: float
+    all_distances: list[tuple[float, float]]  # (time_b, distance) for all frames in B
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -151,6 +176,105 @@ def output_csv(
         print(output)
 
 
+def extract_frame_data(
+    video_path: str,
+    interval: float,
+    red_min: int,
+    red_max_gb: int,
+    progress_prefix: str = ""
+) -> list[FrameData]:
+    """Extract frame data (frame, red circle, segment) from a video at regular intervals."""
+    video = cv2.VideoCapture(video_path)
+    if not video.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    try:
+        duration, fps, _ = get_video_info(video)
+        frames: list[FrameData] = []
+
+        time = 0.0
+        total_frames = int(duration / interval)
+        frame_num = 0
+
+        while time < duration:
+            frame_num += 1
+            pct = (frame_num / total_frames) * 100 if total_frames > 0 else 0
+            print(f"\r{progress_prefix}Extracting frames: {pct:5.1f}% ({frame_num}/{total_frames})   ", end="", file=sys.stderr)
+
+            frame = get_frame_at_time(video, time)
+            if frame is not None:
+                circle = find_red_circle(frame, red_min, red_max_gb)
+                segment = detect_segment_number(frame)
+                frames.append(FrameData(
+                    time=time,
+                    frame=frame,
+                    circle=circle,
+                    segment=segment
+                ))
+
+            time += interval
+
+        print(file=sys.stderr)  # Newline after progress
+        return frames
+
+    finally:
+        video.release()
+
+
+def compute_cross_correlations(
+    frames_a: list[FrameData],
+    frames_b: list[FrameData]
+) -> list[CrossCorrelationResult]:
+    """
+    Compute cross-correlation for each frame in A against ALL frames in B.
+
+    Uses red circle position distance as the correlation metric.
+    Lower distance = better match.
+    """
+    results: list[CrossCorrelationResult] = []
+
+    for i, fa in enumerate(frames_a):
+        pct = ((i + 1) / len(frames_a)) * 100
+        print(f"\rCross-correlating: {pct:5.1f}% ({i + 1}/{len(frames_a)})   ", end="", file=sys.stderr)
+
+        all_distances: list[tuple[float, float]] = []
+        best_distance = float('inf')
+        best_idx = 0
+
+        for j, fb in enumerate(frames_b):
+            # Compute distance between red circles
+            if fa.circle is not None and fb.circle is not None:
+                dx = fa.circle[0] - fb.circle[0]
+                dy = fa.circle[1] - fb.circle[1]
+                distance = np.sqrt(dx * dx + dy * dy)
+            else:
+                # If either circle is missing, use a large distance
+                distance = 10000.0
+
+            all_distances.append((fb.time, distance))
+
+            if distance < best_distance:
+                best_distance = distance
+                best_idx = j
+
+        best_fb = frames_b[best_idx]
+        results.append(CrossCorrelationResult(
+            time_a=fa.time,
+            frame_a=fa.frame,
+            circle_a=fa.circle,
+            segment_a=fa.segment,
+            best_time_b=best_fb.time,
+            best_frame_b=best_fb.frame,
+            best_circle_b=best_fb.circle,
+            best_segment_b=best_fb.segment,
+            best_distance=best_distance,
+            all_distances=all_distances
+        ))
+
+    print(file=sys.stderr)  # Newline after progress
+    return results
+
+
 def run_debug_mode(
     video_a_path: str,
     video_b_path: str,
@@ -161,110 +285,261 @@ def run_debug_mode(
     initial_search_seconds: float,
     interval: float
 ) -> None:
-    """Run interactive debug mode with visualization."""
-    video_a = cv2.VideoCapture(video_a_path)
-    video_b = cv2.VideoCapture(video_b_path)
+    """Run interactive debug mode with pre-computed cross-correlations."""
+    print("=" * 60, file=sys.stderr)
+    print("PHASE 1: Extracting frame data from videos", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
 
-    if not video_a.isOpened():
-        print(f"Error: Could not open video A: {video_a_path}", file=sys.stderr)
-        sys.exit(1)
-    if not video_b.isOpened():
-        print(f"Error: Could not open video B: {video_b_path}", file=sys.stderr)
-        sys.exit(1)
+    # Extract all frame data from both videos
+    print(f"\nVideo A: {video_a_path}", file=sys.stderr)
+    frames_a = extract_frame_data(video_a_path, interval, red_min, red_max_gb, "  [A] ")
 
-    try:
-        duration_a, fps_a, _ = get_video_info(video_a)
-        duration_b, fps_b, _ = get_video_info(video_b)
+    print(f"\nVideo B: {video_b_path}", file=sys.stderr)
+    frames_b = extract_frame_data(video_b_path, interval, red_min, red_max_gb, "  [B] ")
 
-        print(f"Video A: {duration_a:.1f}s @ {fps_a:.1f} fps")
-        print(f"Video B: {duration_b:.1f}s @ {fps_b:.1f} fps")
-        print()
-        print("Controls:")
-        print("  → (Right Arrow): Advance 1 second")
-        print("  ← (Left Arrow): Go back 1 second")
-        print("  ↑ (Up Arrow): Advance 10 seconds")
-        print("  ↓ (Down Arrow): Go back 10 seconds")
-        print("  ESC: Exit")
-        print()
+    print(f"\nExtracted {len(frames_a)} frames from A, {len(frames_b)} frames from B", file=sys.stderr)
 
-        current_time_a = 0.0
-        previous_best_time_b: Optional[float] = None
+    # Count frames with detected circles
+    circles_a = sum(1 for f in frames_a if f.circle is not None)
+    circles_b = sum(1 for f in frames_b if f.circle is not None)
+    print(f"Red circles detected: A={circles_a}/{len(frames_a)}, B={circles_b}/{len(frames_b)}", file=sys.stderr)
 
-        while True:
-            # Get frame from video A
-            frame_a = get_frame_at_time(video_a, current_time_a)
-            if frame_a is None:
-                print(f"Warning: Could not read frame at {current_time_a:.1f}s")
-                current_time_a = min(current_time_a + interval, duration_a - 0.1)
-                continue
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("PHASE 2: Computing cross-correlations", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
 
-            # Detect red circle in frame A
-            circle_a = find_red_circle(frame_a, red_min, red_max_gb)
+    # Pre-compute all cross-correlations
+    results = compute_cross_correlations(frames_a, frames_b)
 
-            # Detect segment number in frame A
-            segment_a = detect_segment_number(frame_a)
+    print(f"\nComputed {len(results)} cross-correlation results", file=sys.stderr)
 
-            # Binarize frame A
-            binary_a = binarize_frame(frame_a, threshold, red_min, red_max_gb)
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("PHASE 3: Interactive visualization", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print("\nControls:", file=sys.stderr)
+    print("  → (Right Arrow): Next frame", file=sys.stderr)
+    print("  ← (Left Arrow): Previous frame", file=sys.stderr)
+    print("  ↑ (Up Arrow): Jump forward 10 frames", file=sys.stderr)
+    print("  ↓ (Down Arrow): Jump back 10 frames", file=sys.stderr)
+    print("  ESC: Exit", file=sys.stderr)
+    print(file=sys.stderr)
 
-            # Find best match in video B
-            result = find_best_match(
-                binary_a,
-                video_b,
-                center_time=previous_best_time_b,
-                window_frames=window_frames,
-                initial_search_seconds=initial_search_seconds,
-                white_threshold=threshold,
-                red_min=red_min,
-                red_max_gb=red_max_gb
-            )
+    # Interactive display loop
+    current_idx = 0
 
-            # Get best matching frame from video B
-            frame_b = get_frame_at_time(video_b, result.best_time)
-            if frame_b is None:
-                frame_b = np.zeros_like(frame_a)
+    while True:
+        result = results[current_idx]
 
-            # Detect red circle and segment in frame B
-            circle_b = find_red_circle(frame_b, red_min, red_max_gb)
-            segment_b = detect_segment_number(frame_b)
+        # Create visualization from pre-computed data
+        display = create_debug_display_v2(result, len(results), current_idx)
 
-            # Create visualization
-            display = create_debug_display(
-                frame_a, frame_b, binary_a,
-                current_time_a, result,
-                previous_best_time_b, fps_b,
-                circle_a, circle_b,
-                segment_a, segment_b
-            )
+        cv2.imshow("Cross-Correlation Debug", display)
 
-            # Show display
-            cv2.imshow("Video Alignment Debug", display)
+        # Handle keyboard input
+        key = cv2.waitKey(0) & 0xFF
 
-            # Handle keyboard input
-            key = cv2.waitKey(0) & 0xFF
+        if key == 27:  # ESC
+            break
+        elif key == 83 or key == 3:  # Right arrow - next frame
+            current_idx = min(current_idx + 1, len(results) - 1)
+        elif key == 81 or key == 2:  # Left arrow - previous frame
+            current_idx = max(current_idx - 1, 0)
+        elif key == 82 or key == 0:  # Up arrow - jump forward 10
+            current_idx = min(current_idx + 10, len(results) - 1)
+        elif key == 84 or key == 1:  # Down arrow - jump back 10
+            current_idx = max(current_idx - 10, 0)
 
-            if key == 27:  # ESC
-                break
-            elif key == 83 or key == 3:  # Right arrow
-                current_time_a = min(current_time_a + interval, duration_a - 0.1)
-                previous_best_time_b = result.best_time
-            elif key == 81 or key == 2:  # Left arrow
-                current_time_a = max(current_time_a - interval, 0.0)
-                # When going back, we need to reset tracking
-                if current_time_a == 0.0:
-                    previous_best_time_b = None
-            elif key == 82 or key == 0:  # Up arrow - advance 10 seconds
-                current_time_a = min(current_time_a + 10.0, duration_a - 0.1)
-                previous_best_time_b = result.best_time
-            elif key == 84 or key == 1:  # Down arrow - go back 10 seconds
-                current_time_a = max(current_time_a - 10.0, 0.0)
-                if current_time_a == 0.0:
-                    previous_best_time_b = None
+    cv2.destroyAllWindows()
 
-    finally:
-        video_a.release()
-        video_b.release()
-        cv2.destroyAllWindows()
+
+def create_debug_display_v2(
+    result: CrossCorrelationResult,
+    total_results: int,
+    current_idx: int
+) -> np.ndarray:
+    """Create debug visualization from pre-computed cross-correlation result."""
+    frame_a = result.frame_a
+    frame_b = result.best_frame_b
+
+    # Get frame dimensions
+    h, w = frame_a.shape[:2]
+
+    # Scale frames to fit display (max 640 width each)
+    max_frame_width = 640
+    scale = min(1.0, max_frame_width / w)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    # Resize frames
+    frame_a_resized = cv2.resize(frame_a, (new_w, new_h))
+    frame_b_resized = cv2.resize(frame_b, (new_w, new_h))
+
+    # Convert RGB to BGR for OpenCV display
+    frame_a_bgr = cv2.cvtColor(frame_a_resized, cv2.COLOR_RGB2BGR)
+    frame_b_bgr = cv2.cvtColor(frame_b_resized, cv2.COLOR_RGB2BGR)
+
+    # Draw detected red circles (scaled to resized frame)
+    if result.circle_a is not None:
+        cx, cy, r = result.circle_a
+        cx_scaled = int(cx * scale)
+        cy_scaled = int(cy * scale)
+        r_scaled = max(int(r * scale), 3)
+        # Draw crosshair at detected circle position
+        cv2.circle(frame_a_bgr, (cx_scaled, cy_scaled), r_scaled + 5, (0, 255, 0), 2)
+        cv2.line(frame_a_bgr, (cx_scaled - 15, cy_scaled), (cx_scaled + 15, cy_scaled), (0, 255, 0), 2)
+        cv2.line(frame_a_bgr, (cx_scaled, cy_scaled - 15), (cx_scaled, cy_scaled + 15), (0, 255, 0), 2)
+
+    if result.best_circle_b is not None:
+        cx, cy, r = result.best_circle_b
+        cx_scaled = int(cx * scale)
+        cy_scaled = int(cy * scale)
+        r_scaled = max(int(r * scale), 3)
+        # Draw crosshair at detected circle position
+        cv2.circle(frame_b_bgr, (cx_scaled, cy_scaled), r_scaled + 5, (0, 255, 0), 2)
+        cv2.line(frame_b_bgr, (cx_scaled - 15, cy_scaled), (cx_scaled + 15, cy_scaled), (0, 255, 0), 2)
+        cv2.line(frame_b_bgr, (cx_scaled, cy_scaled - 15), (cx_scaled, cy_scaled + 15), (0, 255, 0), 2)
+
+    # Add labels to frames
+    cv2.putText(frame_a_bgr, f"Video A: {result.time_a:.2f}s", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.putText(frame_b_bgr, f"Video B: {result.best_time_b:.2f}s", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+    # Add segment labels if detected
+    segment_a_str = f"Seg: {result.segment_a}" if result.segment_a is not None else "Seg: ?"
+    segment_b_str = f"Seg: {result.best_segment_b}" if result.best_segment_b is not None else "Seg: ?"
+    cv2.putText(frame_a_bgr, segment_a_str, (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    cv2.putText(frame_b_bgr, segment_b_str, (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+    # Add circle position info
+    if result.circle_a is not None:
+        circle_a_str = f"Circle: ({result.circle_a[0]}, {result.circle_a[1]})"
+    else:
+        circle_a_str = "Circle: Not found"
+    if result.best_circle_b is not None:
+        circle_b_str = f"Circle: ({result.best_circle_b[0]}, {result.best_circle_b[1]})"
+    else:
+        circle_b_str = "Circle: Not found"
+    cv2.putText(frame_a_bgr, circle_a_str, (10, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 200), 1)
+    cv2.putText(frame_b_bgr, circle_b_str, (10, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 200), 1)
+
+    # Stack frames horizontally
+    frames_row = np.hstack([frame_a_bgr, frame_b_bgr])
+
+    # Create distance graph (shows distance to all frames in B)
+    graph_height = 200
+    graph_width = new_w * 2
+    graph = create_distance_graph(result.all_distances, result.best_time_b, graph_width, graph_height)
+
+    # Create info bar with more details
+    info_height = 60
+    info_bar = np.zeros((info_height, graph_width, 3), dtype=np.uint8)
+    info_bar[:] = (40, 40, 40)
+
+    # First line: times and distance
+    info_text = f"Frame {current_idx + 1}/{total_results} | Time A: {result.time_a:.2f}s | Time B: {result.best_time_b:.2f}s | Distance: {result.best_distance:.1f}px"
+    cv2.putText(info_bar, info_text, (10, 22),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+
+    # Second line: segment match and controls
+    seg_match = "Segment: MATCH" if result.segment_a == result.best_segment_b and result.segment_a is not None else "Segment: mismatch"
+    info_text2 = f"{seg_match} | Controls: ←→ (1 frame), ↑↓ (10 frames), ESC (exit)"
+    cv2.putText(info_bar, info_text2, (10, 48),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+
+    # Stack everything vertically
+    display = np.vstack([frames_row, graph, info_bar])
+
+    return display
+
+
+def create_distance_graph(
+    all_distances: list[tuple[float, float]],
+    best_time: float,
+    width: int,
+    height: int
+) -> np.ndarray:
+    """Create a graph showing distance to all frames in video B."""
+    graph = np.zeros((height, width, 3), dtype=np.uint8)
+    graph[:] = (30, 30, 30)  # Dark gray background
+
+    if not all_distances:
+        return graph
+
+    times = [d[0] for d in all_distances]
+    distances = [d[1] for d in all_distances]
+
+    # Cap distances for display (ignore 10000 sentinel values)
+    display_distances = [min(d, 500) for d in distances]
+
+    min_dist = 0
+    max_dist = max(d for d in display_distances if d < 10000) if any(d < 10000 for d in display_distances) else 500
+    if max_dist == min_dist:
+        max_dist = min_dist + 1
+
+    # Calculate graph margins
+    margin_left = 60
+    margin_right = 20
+    margin_top = 20
+    margin_bottom = 30
+    graph_width = width - margin_left - margin_right
+    graph_height = height - margin_top - margin_bottom
+
+    # Draw axis lines
+    cv2.line(graph, (margin_left, margin_top),
+             (margin_left, height - margin_bottom), (100, 100, 100), 1)
+    cv2.line(graph, (margin_left, height - margin_bottom),
+             (width - margin_right, height - margin_bottom), (100, 100, 100), 1)
+
+    # Draw distance line
+    points = []
+    best_point_idx = 0
+    best_dist_val = float('inf')
+
+    for i, (t, dist) in enumerate(zip(times, display_distances)):
+        # X position based on index
+        x = margin_left + int((i / max(len(times) - 1, 1)) * graph_width)
+        # Y position based on distance (inverted - lower distance = higher on graph)
+        normalized = (dist - min_dist) / (max_dist - min_dist)
+        y = margin_top + int(normalized * graph_height)
+        points.append((x, y))
+
+        if distances[i] < best_dist_val:
+            best_dist_val = distances[i]
+            best_point_idx = i
+
+    # Draw line connecting points
+    if len(points) > 1:
+        for i in range(len(points) - 1):
+            cv2.line(graph, points[i], points[i + 1], (100, 100, 255), 1)
+
+    # Draw best match marker (lowest distance)
+    if points:
+        best_point = points[best_point_idx]
+        cv2.circle(graph, best_point, 6, (0, 255, 0), -1)  # Green dot for best match
+
+    # Draw labels
+    cv2.putText(graph, f"{int(min_dist)}px", (5, margin_top + 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+    cv2.putText(graph, f"{int(max_dist)}px", (5, height - margin_bottom - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+
+    # Time labels
+    if times:
+        cv2.putText(graph, f"{times[0]:.0f}s", (margin_left, height - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+        cv2.putText(graph, f"{times[-1]:.0f}s", (width - margin_right - 40, height - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+
+    # Title
+    cv2.putText(graph, "Distance to frames in Video B (lower = better match)", (width // 2 - 150, 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    return graph
 
 
 def create_debug_display(
