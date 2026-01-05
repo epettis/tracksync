@@ -38,6 +38,7 @@ class FrameData:
     frame: np.ndarray  # Original RGB frame
     circle: Optional[tuple[int, int, int]]  # (x, y, radius) or None
     segment: Optional[int]  # Segment number or None
+    red_mask: Optional[np.ndarray] = None  # Binary mask of red pixels in search region
 
 
 @dataclass
@@ -53,6 +54,47 @@ class CrossCorrelationResult:
     best_segment_b: Optional[int]
     best_distance: float
     all_distances: list[tuple[float, float]]  # (time_b, distance) for all frames in B
+    red_mask_a: Optional[np.ndarray] = None  # Binary mask of red pixels for frame A
+    red_mask_b: Optional[np.ndarray] = None  # Binary mask of red pixels for frame B
+
+
+def compute_red_mask(
+    frame: np.ndarray,
+    red_min: int = 200,
+    red_max_gb: int = 80
+) -> np.ndarray:
+    """
+    Compute a binary mask showing which pixels are considered "red" for matching.
+
+    Args:
+        frame: RGB frame as numpy array
+        red_min: Minimum R value for red detection
+        red_max_gb: Maximum G and B values for red detection
+
+    Returns:
+        Binary mask (H, W) where 1 indicates red pixels
+    """
+    h, w = frame.shape[:2]
+
+    # Create full-frame mask initialized to 0
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    # Define search region (top-right quadrant)
+    y1, y2, x1, x2 = 0, h // 2, w // 2, w
+
+    # Extract the search region
+    region = frame[y1:y2, x1:x2]
+
+    # Create red mask for search region
+    r = region[:, :, 0]
+    g = region[:, :, 1]
+    b = region[:, :, 2]
+    red_mask = ((r >= red_min) & (g <= red_max_gb) & (b <= red_max_gb)).astype(np.uint8)
+
+    # Place the red mask into the full-frame mask
+    mask[y1:y2, x1:x2] = red_mask
+
+    return mask
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -181,19 +223,40 @@ def extract_frame_data(
     interval: float,
     red_min: int,
     red_max_gb: int,
-    progress_prefix: str = ""
-) -> list[FrameData]:
-    """Extract frame data (frame, red circle, segment) from a video at regular intervals."""
+    progress_prefix: str = "",
+    use_native_fps: bool = False
+) -> tuple[list[FrameData], float]:
+    """
+    Extract frame data (frame, red circle, segment) from a video.
+
+    Args:
+        video_path: Path to video file
+        interval: Sampling interval in seconds (ignored if use_native_fps=True)
+        red_min: Minimum R value for red detection
+        red_max_gb: Maximum G/B values for red detection
+        progress_prefix: Prefix for progress output
+        use_native_fps: If True, extract every frame at native video FPS
+
+    Returns:
+        Tuple of (list of FrameData, actual fps used)
+    """
     video = cv2.VideoCapture(video_path)
     if not video.isOpened():
         raise ValueError(f"Could not open video: {video_path}")
 
     try:
-        duration, fps, _ = get_video_info(video)
+        duration, fps, frame_count = get_video_info(video)
         frames: list[FrameData] = []
 
+        if use_native_fps:
+            # Extract every frame at native FPS
+            actual_interval = 1.0 / fps
+            total_frames = frame_count
+        else:
+            actual_interval = interval
+            total_frames = int(duration / interval)
+
         time = 0.0
-        total_frames = int(duration / interval)
         frame_num = 0
 
         while time < duration:
@@ -205,17 +268,19 @@ def extract_frame_data(
             if frame is not None:
                 circle = find_red_circle(frame, red_min, red_max_gb)
                 segment = detect_segment_number(frame)
+                red_mask = compute_red_mask(frame, red_min, red_max_gb)
                 frames.append(FrameData(
                     time=time,
                     frame=frame,
                     circle=circle,
-                    segment=segment
+                    segment=segment,
+                    red_mask=red_mask
                 ))
 
-            time += interval
+            time += actual_interval
 
         print(file=sys.stderr)  # Newline after progress
-        return frames
+        return frames, fps
 
     finally:
         video.release()
@@ -268,7 +333,9 @@ def compute_cross_correlations(
             best_circle_b=best_fb.circle,
             best_segment_b=best_fb.segment,
             best_distance=best_distance,
-            all_distances=all_distances
+            all_distances=all_distances,
+            red_mask_a=fa.red_mask,
+            red_mask_b=best_fb.red_mask
         ))
 
     print(file=sys.stderr)  # Newline after progress
@@ -286,18 +353,31 @@ def run_debug_mode(
     interval: float
 ) -> None:
     """Run interactive debug mode with pre-computed cross-correlations."""
+    import os
+
+    # Check if both videos are the same file
+    same_file = os.path.realpath(video_a_path) == os.path.realpath(video_b_path)
+
     print("=" * 60, file=sys.stderr)
-    print("PHASE 1: Extracting frame data from videos", file=sys.stderr)
+    print("PHASE 1: Extracting frame data from videos (native FPS)", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
-    # Extract all frame data from both videos
+    # Extract all frame data from both videos at native FPS
     print(f"\nVideo A: {video_a_path}", file=sys.stderr)
-    frames_a = extract_frame_data(video_a_path, interval, red_min, red_max_gb, "  [A] ")
+    frames_a, fps_a = extract_frame_data(video_a_path, interval, red_min, red_max_gb, "  [A] ", use_native_fps=True)
 
-    print(f"\nVideo B: {video_b_path}", file=sys.stderr)
-    frames_b = extract_frame_data(video_b_path, interval, red_min, red_max_gb, "  [B] ")
+    if same_file:
+        print(f"\nVideo B: same as Video A (reusing extracted data)", file=sys.stderr)
+        # Reuse frames_a for frames_b - they're the same video
+        frames_b = frames_a
+        fps_b = fps_a
+    else:
+        print(f"\nVideo B: {video_b_path}", file=sys.stderr)
+        frames_b, fps_b = extract_frame_data(video_b_path, interval, red_min, red_max_gb, "  [B] ", use_native_fps=True)
 
-    print(f"\nExtracted {len(frames_a)} frames from A, {len(frames_b)} frames from B", file=sys.stderr)
+    print(f"\nExtracted {len(frames_a)} frames from A ({fps_a:.1f} fps), {len(frames_b)} frames from B ({fps_b:.1f} fps)", file=sys.stderr)
+    if same_file:
+        print("(Same file optimization: frames extracted only once)", file=sys.stderr)
 
     # Count frames with detected circles
     circles_a = sum(1 for f in frames_a if f.circle is not None)
@@ -316,11 +396,14 @@ def run_debug_mode(
     print("\n" + "=" * 60, file=sys.stderr)
     print("PHASE 3: Interactive visualization", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
+    # Use actual FPS for jumping by 1 second
+    frames_per_second = int(fps_a)
+
     print("\nControls:", file=sys.stderr)
     print("  → (Right Arrow): Next frame", file=sys.stderr)
     print("  ← (Left Arrow): Previous frame", file=sys.stderr)
-    print("  ↑ (Up Arrow): Jump forward 10 frames", file=sys.stderr)
-    print("  ↓ (Down Arrow): Jump back 10 frames", file=sys.stderr)
+    print(f"  ↑ (Up Arrow): Jump forward 1 second ({frames_per_second} frames)", file=sys.stderr)
+    print(f"  ↓ (Down Arrow): Jump back 1 second ({frames_per_second} frames)", file=sys.stderr)
     print("  ESC: Exit", file=sys.stderr)
     print(file=sys.stderr)
 
@@ -344,12 +427,55 @@ def run_debug_mode(
             current_idx = min(current_idx + 1, len(results) - 1)
         elif key == 81 or key == 2:  # Left arrow - previous frame
             current_idx = max(current_idx - 1, 0)
-        elif key == 82 or key == 0:  # Up arrow - jump forward 10
-            current_idx = min(current_idx + 10, len(results) - 1)
-        elif key == 84 or key == 1:  # Down arrow - jump back 10
-            current_idx = max(current_idx - 10, 0)
+        elif key == 82 or key == 0:  # Up arrow - jump forward 1 second
+            current_idx = min(current_idx + frames_per_second, len(results) - 1)
+        elif key == 84 or key == 1:  # Down arrow - jump back 1 second
+            current_idx = max(current_idx - frames_per_second, 0)
 
     cv2.destroyAllWindows()
+
+
+def apply_mask_overlay(
+    frame: np.ndarray,
+    mask: Optional[np.ndarray],
+    considered_opacity: float = 1.0,
+    masked_opacity: float = 0.25
+) -> np.ndarray:
+    """
+    Apply a visual overlay to show which pixels are being considered.
+
+    Pixels where mask=1 keep full opacity (considered for matching).
+    Pixels where mask=0 are dimmed to masked_opacity (not considered).
+
+    Args:
+        frame: BGR frame as numpy array
+        mask: Binary mask (H, W) where 1 = considered, 0 = not considered
+        considered_opacity: Opacity for considered pixels (default: 1.0)
+        masked_opacity: Opacity for masked-out pixels (default: 0.25)
+
+    Returns:
+        Frame with mask overlay applied
+    """
+    if mask is None:
+        return frame
+
+    # Resize mask to match frame if needed
+    if mask.shape[:2] != frame.shape[:2]:
+        mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+    # Create output frame
+    result = frame.copy().astype(np.float32)
+
+    # Apply opacity based on mask
+    # Where mask=0, dim the pixels to masked_opacity
+    # Where mask=1, keep at considered_opacity
+    mask_3ch = np.stack([mask, mask, mask], axis=2).astype(np.float32)
+
+    # Blend: result = frame * (mask * considered_opacity + (1-mask) * masked_opacity)
+    opacity = mask_3ch * considered_opacity + (1 - mask_3ch) * masked_opacity
+    result = result * opacity
+
+    return result.astype(np.uint8)
 
 
 def create_debug_display_v2(
@@ -377,6 +503,15 @@ def create_debug_display_v2(
     # Convert RGB to BGR for OpenCV display
     frame_a_bgr = cv2.cvtColor(frame_a_resized, cv2.COLOR_RGB2BGR)
     frame_b_bgr = cv2.cvtColor(frame_b_resized, cv2.COLOR_RGB2BGR)
+
+    # Apply mask overlay to show which pixels are being considered
+    # Resize masks to match resized frames
+    if result.red_mask_a is not None:
+        mask_a_resized = cv2.resize(result.red_mask_a, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+        frame_a_bgr = apply_mask_overlay(frame_a_bgr, mask_a_resized)
+    if result.red_mask_b is not None:
+        mask_b_resized = cv2.resize(result.red_mask_b, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+        frame_b_bgr = apply_mask_overlay(frame_b_bgr, mask_b_resized)
 
     # Draw detected red circles (scaled to resized frame)
     if result.circle_a is not None:
@@ -447,7 +582,7 @@ def create_debug_display_v2(
 
     # Second line: segment match and controls
     seg_match = "Segment: MATCH" if result.segment_a == result.best_segment_b and result.segment_a is not None else "Segment: mismatch"
-    info_text2 = f"{seg_match} | Controls: ←→ (1 frame), ↑↓ (10 frames), ESC (exit)"
+    info_text2 = f"{seg_match} | Controls: ←→ (1 frame), ↑↓ (1 sec), ESC (exit)"
     cv2.putText(info_bar, info_text2, (10, 48),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
 

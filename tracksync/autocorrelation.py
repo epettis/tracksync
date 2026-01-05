@@ -241,19 +241,25 @@ def find_red_circle(
     frame: np.ndarray,
     red_min: int = 200,
     red_max_gb: int = 80,
-    min_radius: int = 5,
+    min_radius: int = 3,
     max_radius: int = 30,
     search_region: Optional[tuple[int, int, int, int]] = None
 ) -> Optional[tuple[int, int, int]]:
     """
-    Find the red circle (car marker) in a frame using Hough Circle detection.
+    Find the red circle (car marker) in a frame by detecting the red-filled region.
+
+    This function finds the centroid of red pixels, not edges/outlines.
+    It works by:
+    1. Creating a mask of pixels that match the red color criteria
+    2. Finding contours in that mask
+    3. Returning the centroid of the largest red region
 
     Args:
         frame: RGB frame as numpy array
-        red_min: Minimum R value for red detection
-        red_max_gb: Maximum G and B values for red detection
-        min_radius: Minimum circle radius to detect
-        max_radius: Maximum circle radius to detect
+        red_min: Minimum R value for red detection (default: 200)
+        red_max_gb: Maximum G and B values for red detection (default: 80)
+        min_radius: Minimum circle radius to detect (default: 3)
+        max_radius: Maximum circle radius to detect (default: 30)
         search_region: Optional (y1, y2, x1, x2) to restrict search area.
                       If None, defaults to top-right quadrant where track overlay typically is.
 
@@ -271,49 +277,49 @@ def find_red_circle(
     # Extract the search region
     region = frame[y1:y2, x1:x2]
 
-    # Create red mask
+    # Create red mask - detect the RED FILL, not the black outline
+    # This finds uniformly colored red pixels
     r = region[:, :, 0]
     g = region[:, :, 1]
     b = region[:, :, 2]
     red_mask = ((r >= red_min) & (g <= red_max_gb) & (b <= red_max_gb)).astype(np.uint8) * 255
 
     # Apply morphological operations to clean up the mask
-    kernel = np.ones((3, 3), np.uint8)
+    # Use a slightly larger kernel to fill in small gaps
+    kernel = np.ones((5, 5), np.uint8)
     red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
     red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel)
 
-    # Find circles using Hough transform
-    circles = cv2.HoughCircles(
-        red_mask,
-        cv2.HOUGH_GRADIENT,
-        dp=1,
-        minDist=50,
-        param1=50,
-        param2=10,
-        minRadius=min_radius,
-        maxRadius=max_radius
-    )
-
-    if circles is not None and len(circles) > 0:
-        # Return the first (most prominent) circle, adjusted to full frame coordinates
-        x, y, radius = circles[0][0]
-        return (int(x) + x1, int(y) + y1, int(radius))
-
-    # Fallback: find centroid of red region
+    # Find contours of red regions (the filled red circle)
     contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if contours:
-        # Find the largest contour
-        largest = max(contours, key=cv2.contourArea)
-        M = cv2.moments(largest)
-        if M["m00"] > 0:
-            cx = int(M["m10"] / M["m00"])
-            cy = int(M["m01"] / M["m00"])
-            # Estimate radius from area
-            area = cv2.contourArea(largest)
-            radius = int(np.sqrt(area / np.pi))
-            if min_radius <= radius <= max_radius:
-                # Adjust to full frame coordinates
-                return (cx + x1, cy + y1, radius)
+
+    if not contours:
+        return None
+
+    # Find the largest contour that fits our size criteria
+    valid_contours = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < 5:  # Skip tiny noise
+            continue
+        # Estimate radius from area (area = pi * r^2)
+        estimated_radius = np.sqrt(area / np.pi)
+        if min_radius <= estimated_radius <= max_radius:
+            valid_contours.append((contour, area, estimated_radius))
+
+    if not valid_contours:
+        return None
+
+    # Use the largest valid contour
+    largest_contour, area, radius = max(valid_contours, key=lambda x: x[1])
+
+    # Calculate centroid of the red region
+    M = cv2.moments(largest_contour)
+    if M["m00"] > 0:
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
+        # Adjust to full frame coordinates
+        return (cx + x1, cy + y1, int(radius))
 
     return None
 
