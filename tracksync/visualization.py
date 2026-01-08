@@ -547,3 +547,247 @@ def create_debug_display_v2(
         display = np.vstack([frames_row, ocr_bar, graph, info_bar])
 
     return display
+
+
+def create_debug_display_from_diagnostic(
+    result: CrossCorrelationResult,
+    frame_a: Optional[np.ndarray],
+    frame_b: Optional[np.ndarray],
+    total_results: int,
+    current_idx: int,
+    turn_analysis_a: Optional[TurnAnalysis] = None,
+    turn_analysis_b: Optional[TurnAnalysis] = None
+) -> np.ndarray:
+    """Create debug visualization from diagnostic data with on-demand frame loading.
+
+    This function is similar to create_debug_display_v2 but takes frames as
+    separate parameters instead of getting them from the result object.
+    This allows frames to be loaded on-demand from video files.
+
+    Args:
+        result: CrossCorrelationResult from diagnostic data (without frame data)
+        frame_a: RGB frame for video A (loaded on-demand), or None if unavailable
+        frame_b: RGB frame for video B (loaded on-demand), or None if unavailable
+        total_results: Total number of results for progress display
+        current_idx: Current result index for progress display
+        turn_analysis_a: Turn analysis for video A
+        turn_analysis_b: Turn analysis for video B
+
+    Returns:
+        BGR image for OpenCV display
+    """
+    # Default frame size if no frames available
+    default_h, default_w = 480, 640
+
+    # Handle missing frame A
+    if frame_a is None:
+        frame_a = np.zeros((default_h, default_w, 3), dtype=np.uint8)
+        frame_a[:] = (40, 40, 40)  # Dark gray
+        cv2.putText(frame_a, "Video A: Frame not available", (50, default_h // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
+
+    # Get frame dimensions from frame A
+    h, w = frame_a.shape[:2]
+
+    # Handle missing frame B or no-match case
+    if frame_b is None or result.no_match or result.best_time_b is None:
+        frame_b = np.zeros((h, w, 3), dtype=np.uint8)
+        if result.no_match:
+            frame_b[:] = (20, 20, 40)  # Dark red tint
+        else:
+            frame_b[:] = (40, 40, 40)  # Dark gray
+
+    # Scale frames to fit display (max 640 width each)
+    max_frame_width = 640
+    scale = min(1.0, max_frame_width / w)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    # Resize frames
+    frame_a_resized = cv2.resize(frame_a, (new_w, new_h))
+    frame_b_resized = cv2.resize(frame_b, (new_w, new_h))
+
+    # Convert RGB to BGR for OpenCV display
+    frame_a_bgr = cv2.cvtColor(frame_a_resized, cv2.COLOR_RGB2BGR)
+    frame_b_bgr = cv2.cvtColor(frame_b_resized, cv2.COLOR_RGB2BGR)
+
+    # Draw detected red circles (no mask overlay in diagnostic mode)
+    if result.circle_a is not None:
+        cx, cy, r = result.circle_a
+        cx_scaled = int(cx * scale)
+        cy_scaled = int(cy * scale)
+        r_scaled = max(int(r * scale), 3)
+        color_a = (0, 255, 255) if result.circle_a_interpolated else (0, 255, 0)
+        cv2.circle(frame_a_bgr, (cx_scaled, cy_scaled), r_scaled + 5, color_a, 2)
+        cv2.line(frame_a_bgr, (cx_scaled - 15, cy_scaled), (cx_scaled + 15, cy_scaled), color_a, 2)
+        cv2.line(frame_a_bgr, (cx_scaled, cy_scaled - 15), (cx_scaled, cy_scaled + 15), color_a, 2)
+
+    if result.best_circle_b is not None:
+        cx, cy, r = result.best_circle_b
+        cx_scaled = int(cx * scale)
+        cy_scaled = int(cy * scale)
+        r_scaled = max(int(r * scale), 3)
+        color_b = (0, 255, 255) if result.circle_b_interpolated else (0, 255, 0)
+        cv2.circle(frame_b_bgr, (cx_scaled, cy_scaled), r_scaled + 5, color_b, 2)
+        cv2.line(frame_b_bgr, (cx_scaled - 15, cy_scaled), (cx_scaled + 15, cy_scaled), color_b, 2)
+        cv2.line(frame_b_bgr, (cx_scaled, cy_scaled - 15), (cx_scaled, cy_scaled + 15), color_b, 2)
+
+    # Add labels to frames
+    cv2.putText(frame_a_bgr, f"Video A: {result.time_a:.2f}s", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    if result.no_match or result.best_time_b is None:
+        cv2.putText(frame_b_bgr, "Video B: NO MATCH", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+    else:
+        cv2.putText(frame_b_bgr, f"Video B: {result.best_time_b:.2f}s", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+    # Add segment labels
+    segment_a_str = f"Seg: {result.segment_a}" if result.segment_a is not None else "Seg: ?"
+    segment_b_str = f"Seg: {result.best_segment_b}" if result.best_segment_b is not None else "Seg: ?"
+    cv2.putText(frame_a_bgr, segment_a_str, (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    cv2.putText(frame_b_bgr, segment_b_str, (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+    # Add circle position info
+    if result.circle_a is not None:
+        interp_a = " [INTERP]" if result.circle_a_interpolated else ""
+        circle_a_str = f"Circle: ({result.circle_a[0]}, {result.circle_a[1]}){interp_a}"
+    else:
+        circle_a_str = "Circle: Not found"
+    if result.best_circle_b is not None:
+        interp_b = " [INTERP]" if result.circle_b_interpolated else ""
+        circle_b_str = f"Circle: ({result.best_circle_b[0]}, {result.best_circle_b[1]}){interp_b}"
+    else:
+        circle_b_str = "Circle: Not found"
+    color_text_a = (0, 255, 255) if result.circle_a_interpolated else (0, 200, 200)
+    color_text_b = (0, 255, 255) if result.circle_b_interpolated else (0, 200, 200)
+    cv2.putText(frame_a_bgr, circle_a_str, (10, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_text_a, 1)
+    cv2.putText(frame_b_bgr, circle_b_str, (10, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_text_b, 1)
+
+    # Stack frames horizontally
+    frames_row = np.hstack([frame_a_bgr, frame_b_bgr])
+
+    # Create OCR info bar
+    ocr_bar_height = 50
+    ocr_bar_width = new_w * 2
+    ocr_bar = np.zeros((ocr_bar_height, ocr_bar_width, 3), dtype=np.uint8)
+    ocr_bar[:] = (50, 50, 50)
+
+    # Format OCR data for frame A
+    ocr_a = result.ocr_a
+    if ocr_a is not None:
+        if ocr_a.is_optimal_lap:
+            lap_str_a = "OPTIMAL LAP"
+        elif ocr_a.lap_number is not None:
+            lap_str_a = f"LAP {ocr_a.lap_number}"
+        else:
+            lap_str_a = "LAP ?"
+        seg_str_a = f"SEG {ocr_a.segment_number}" if ocr_a.segment_number is not None else "SEG ?"
+
+        if ocr_a.lap_time_seconds is not None:
+            lap_time_a = format_lap_time(ocr_a.lap_time_seconds)
+        else:
+            lap_time_a = "--:--.--"
+
+        cv2.putText(ocr_bar, f"{lap_str_a} | {seg_str_a}", (10, 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        cv2.putText(ocr_bar, f"Lap Time: {lap_time_a}", (10, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    else:
+        cv2.putText(ocr_bar, "OCR: No data", (10, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1)
+
+    # Format OCR data for frame B
+    ocr_b = result.ocr_b
+    if ocr_b is not None:
+        if ocr_b.is_optimal_lap:
+            lap_str_b = "OPTIMAL LAP"
+        elif ocr_b.lap_number is not None:
+            lap_str_b = f"LAP {ocr_b.lap_number}"
+        else:
+            lap_str_b = "LAP ?"
+        seg_str_b = f"SEG {ocr_b.segment_number}" if ocr_b.segment_number is not None else "SEG ?"
+
+        if ocr_b.lap_time_seconds is not None:
+            lap_time_b = format_lap_time(ocr_b.lap_time_seconds)
+        else:
+            lap_time_b = "--:--.--"
+
+        cv2.putText(ocr_bar, f"{lap_str_b} | {seg_str_b}", (new_w + 10, 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        cv2.putText(ocr_bar, f"Lap Time: {lap_time_b}", (new_w + 10, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    elif not result.no_match:
+        cv2.putText(ocr_bar, "OCR: No data", (new_w + 10, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1)
+
+    # Create distance graph
+    graph_height = 200
+    graph_width = new_w * 2
+    graph = create_distance_graph(
+        result.all_distances,
+        result.best_time_b,
+        result.best_distance,
+        result.global_min_time_b,
+        result.global_min_distance,
+        graph_width,
+        graph_height
+    )
+
+    # Create info bar
+    info_height = 60
+    info_bar = np.zeros((info_height, graph_width, 3), dtype=np.uint8)
+    info_bar[:] = (40, 40, 40)
+
+    if result.no_match or result.best_time_b is None:
+        info_text = f"Frame {current_idx + 1}/{total_results} | Time A: {result.time_a:.2f}s | NO MATCH (circle not detected)"
+        cv2.putText(info_bar, info_text, (10, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 1)
+    else:
+        info_text = f"Frame {current_idx + 1}/{total_results} | Time A: {result.time_a:.2f}s | Time B: {result.best_time_b:.2f}s | Distance: {result.best_distance:.1f}px"
+        cv2.putText(info_bar, info_text, (10, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+
+    if result.no_match:
+        seg_match = "Segment: N/A"
+    else:
+        seg_match = "Segment: MATCH" if result.segment_a == result.best_segment_b and result.segment_a is not None else "Segment: mismatch"
+    info_text2 = f"{seg_match} | Controls: ←→ (1 frame), ↑↓ (1 sec), ESC (exit) | [DIAGNOSTIC MODE]"
+    cv2.putText(info_bar, info_text2, (10, 48),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+
+    # Create turn angle graphs if provided
+    turn_graphs = None
+    if turn_analysis_a is not None or turn_analysis_b is not None:
+        turn_graph_height = 100
+        turn_graph_width = new_w
+
+        if turn_analysis_a is not None:
+            turn_graph_a = create_turn_angle_graph(
+                turn_analysis_a, result.time_a, turn_graph_width, turn_graph_height, "A"
+            )
+        else:
+            turn_graph_a = np.zeros((turn_graph_height, turn_graph_width, 3), dtype=np.uint8)
+            turn_graph_a[:] = (30, 30, 30)
+
+        if turn_analysis_b is not None and result.best_time_b is not None:
+            turn_graph_b = create_turn_angle_graph(
+                turn_analysis_b, result.best_time_b, turn_graph_width, turn_graph_height, "B"
+            )
+        else:
+            turn_graph_b = np.zeros((turn_graph_height, turn_graph_width, 3), dtype=np.uint8)
+            turn_graph_b[:] = (30, 30, 30)
+
+        turn_graphs = np.hstack([turn_graph_a, turn_graph_b])
+
+    # Stack everything vertically
+    if turn_graphs is not None:
+        display = np.vstack([frames_row, ocr_bar, graph, turn_graphs, info_bar])
+    else:
+        display = np.vstack([frames_row, ocr_bar, graph, info_bar])
+
+    return display

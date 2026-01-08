@@ -36,8 +36,14 @@ from .cross_correlation import (
     output_tracksync_csv,
 )
 from .turn_analysis import compute_turn_analysis
-from .autocorrelation import interpolate_ocr_data
-from .visualization import create_debug_display_v2
+from .autocorrelation import interpolate_ocr_data, get_frame_at_time
+from .visualization import create_debug_display_v2, create_debug_display_from_diagnostic
+from .diagnostic_io import (
+    export_diagnostic,
+    import_diagnostic,
+    get_results_from_diagnostic,
+    get_turn_analysis_from_diagnostic,
+)
 
 
 def generate_comparison(
@@ -247,6 +253,34 @@ Controls:
     debug_parser.add_argument(
         '--interval', type=float, default=1.0,
         help='Sample interval in seconds (default: 1.0)'
+    )
+    debug_parser.add_argument(
+        '--diagnose-output', metavar='DIR',
+        help='Export diagnostic data to DIR (protobuf text format)'
+    )
+
+    # 'diagnose' subcommand
+    diagnose_parser = subparsers.add_parser(
+        'diagnose',
+        help='Load diagnostic data and run debug visualization',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    # Load diagnostic data and run debug UI
+    tracksync diagnose ./diagnostic_output
+
+    # Diagnose a specific video pair
+    tracksync diagnose ./diagnostic_output/driver_a_v_driver_b.pb
+
+Controls:
+    Arrow keys: Navigate frames
+    Up/Down: Jump 1 second
+    ESC: Exit
+        """
+    )
+    diagnose_parser.add_argument(
+        'diagnostic_path',
+        help='Directory containing .pb files or path to a specific .pb file'
     )
 
     return parser
@@ -596,6 +630,47 @@ def run_debug_mode(args: argparse.Namespace) -> None:
     if not same_file:
         print(f"  Video B: {len(turn_analysis_b.apexes)} turn apexes detected", file=sys.stderr)
 
+    # Export diagnostic data if requested
+    diagnose_output = getattr(args, 'diagnose_output', None)
+    if diagnose_output:
+        print("\n" + "=" * 60, file=sys.stderr)
+        print("EXPORTING DIAGNOSTIC DATA", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+
+        # Get video durations
+        cap_a = cv2.VideoCapture(video_a_path)
+        duration_a = cap_a.get(cv2.CAP_PROP_FRAME_COUNT) / cap_a.get(cv2.CAP_PROP_FPS)
+        cap_a.release()
+
+        if same_file:
+            duration_b = duration_a
+        else:
+            cap_b = cv2.VideoCapture(video_b_path)
+            duration_b = cap_b.get(cv2.CAP_PROP_FRAME_COUNT) / cap_b.get(cv2.CAP_PROP_FPS)
+            cap_b.release()
+
+        # Build output path
+        driver_a = os.path.splitext(os.path.basename(video_a_path))[0]
+        driver_b = os.path.splitext(os.path.basename(video_b_path))[0]
+        output_path = os.path.join(diagnose_output, f"{driver_a}_v_{driver_b}.pb")
+
+        export_diagnostic(
+            results=results,
+            turn_analysis_a=turn_analysis_a,
+            turn_analysis_b=turn_analysis_b,
+            video_a_path=video_a_path,
+            video_b_path=video_b_path,
+            fps_a=fps_a,
+            fps_b=fps_b,
+            duration_a=duration_a,
+            duration_b=duration_b,
+            crossings_a=crossings_a,
+            crossings_b=crossings_b,
+            output_path=output_path,
+        )
+
+        print(f"\nExported diagnostic data to: {output_path}", file=sys.stderr)
+
     print("\n" + "=" * 60, file=sys.stderr)
     print("PHASE 3: Interactive visualization", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
@@ -654,6 +729,124 @@ def run_generate_mode(args: argparse.Namespace) -> None:
                 print(f"Generated: {output}")
 
 
+def run_diagnose_mode(args: argparse.Namespace) -> None:
+    """Run debug visualization from pre-computed diagnostic data."""
+    diagnostic_path = args.diagnostic_path
+
+    # Find .pb files
+    pb_files = []
+    if os.path.isfile(diagnostic_path) and diagnostic_path.endswith('.pb'):
+        pb_files = [diagnostic_path]
+    elif os.path.isdir(diagnostic_path):
+        pb_files = sorted(Path(diagnostic_path).glob('*.pb'))
+        if not pb_files:
+            print(f"Error: No .pb files found in {diagnostic_path}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(f"Error: {diagnostic_path} is not a valid file or directory", file=sys.stderr)
+        sys.exit(1)
+
+    # For now, process the first .pb file (could add selection UI later)
+    pb_file = str(pb_files[0])
+
+    print("=" * 60, file=sys.stderr)
+    print("LOADING DIAGNOSTIC DATA", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print(f"\nLoading: {pb_file}", file=sys.stderr)
+
+    # Load diagnostic data
+    diagnostic = import_diagnostic(pb_file)
+
+    print(f"  Version: {diagnostic.tracksync_version}", file=sys.stderr)
+    print(f"  Video A: {diagnostic.video_a.driver_name} ({diagnostic.video_a.video_path})", file=sys.stderr)
+    print(f"  Video B: {diagnostic.video_b.driver_name} ({diagnostic.video_b.video_path})", file=sys.stderr)
+    print(f"  Results: {len(diagnostic.results)} frames", file=sys.stderr)
+
+    # Extract data from diagnostic
+    results = get_results_from_diagnostic(diagnostic)
+    turn_analysis_a, turn_analysis_b = get_turn_analysis_from_diagnostic(diagnostic)
+
+    # Open video files for on-demand frame loading
+    video_a_path = diagnostic.video_a.video_path
+    video_b_path = diagnostic.video_b.video_path
+
+    if not os.path.exists(video_a_path):
+        print(f"Warning: Video A not found at {video_a_path}", file=sys.stderr)
+        print("  Frames will not be displayed.", file=sys.stderr)
+        cap_a = None
+    else:
+        cap_a = cv2.VideoCapture(video_a_path)
+
+    if not os.path.exists(video_b_path):
+        print(f"Warning: Video B not found at {video_b_path}", file=sys.stderr)
+        print("  Frames will not be displayed.", file=sys.stderr)
+        cap_b = None
+    else:
+        cap_b = cv2.VideoCapture(video_b_path)
+
+    fps_a = diagnostic.video_a.fps
+    frames_per_second = int(fps_a) if fps_a > 0 else 30
+
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("INTERACTIVE VISUALIZATION (from diagnostic data)", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    print("\nControls:", file=sys.stderr)
+    print("  → (Right Arrow): Next frame", file=sys.stderr)
+    print("  ← (Left Arrow): Previous frame", file=sys.stderr)
+    print(f"  ↑ (Up Arrow): Jump forward 1 second ({frames_per_second} frames)", file=sys.stderr)
+    print(f"  ↓ (Down Arrow): Jump back 1 second ({frames_per_second} frames)", file=sys.stderr)
+    print("  ESC: Exit", file=sys.stderr)
+    print(file=sys.stderr)
+
+    # Interactive display loop
+    current_idx = 0
+
+    while True:
+        result = results[current_idx]
+
+        # Load frames on-demand from video files
+        frame_a = None
+        frame_b = None
+
+        if cap_a is not None:
+            frame_a = get_frame_at_time(cap_a, result.time_a)
+
+        if cap_b is not None and result.best_time_b is not None:
+            frame_b = get_frame_at_time(cap_b, result.best_time_b)
+
+        # Create visualization with on-demand frames
+        display = create_debug_display_from_diagnostic(
+            result, frame_a, frame_b,
+            len(results), current_idx,
+            turn_analysis_a, turn_analysis_b
+        )
+
+        cv2.imshow("Cross-Correlation Debug (Diagnostic Mode)", display)
+
+        # Handle keyboard input
+        key = cv2.waitKey(0) & 0xFF
+
+        if key == 27:  # ESC
+            break
+        elif key == 83 or key == 3:  # Right arrow - next frame
+            current_idx = min(current_idx + 1, len(results) - 1)
+        elif key == 81 or key == 2:  # Left arrow - previous frame
+            current_idx = max(current_idx - 1, 0)
+        elif key == 82 or key == 0:  # Up arrow - jump forward 1 second
+            current_idx = min(current_idx + frames_per_second, len(results) - 1)
+        elif key == 84 or key == 1:  # Down arrow - jump back 1 second
+            current_idx = max(current_idx - frames_per_second, 0)
+
+    cv2.destroyAllWindows()
+
+    # Clean up
+    if cap_a is not None:
+        cap_a.release()
+    if cap_b is not None:
+        cap_b.release()
+
+
 def main(argv: list = None) -> None:
     """Main entry point."""
     argv = argv if argv is not None else sys.argv[1:]
@@ -676,6 +869,8 @@ def main(argv: list = None) -> None:
         run_generate_mode(args)
     elif args.command == 'debug':
         run_debug_mode(args)
+    elif args.command == 'diagnose':
+        run_diagnose_mode(args)
 
 
 if __name__ == "__main__":

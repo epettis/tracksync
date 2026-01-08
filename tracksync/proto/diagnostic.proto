@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package tracksync;
+
+// Top-level diagnostic data for a video pair
+message DiagnosticData {
+  string tracksync_version = 1;
+  int64 created_timestamp = 2;
+
+  // Video metadata
+  VideoInfo video_a = 3;
+  VideoInfo video_b = 4;
+
+  // Cross-correlation results (one per frame in video A)
+  repeated CrossCorrelationResult results = 5;
+
+  // Turn analysis for both videos
+  TurnAnalysis turn_analysis_a = 6;
+  TurnAnalysis turn_analysis_b = 7;
+}
+
+message VideoInfo {
+  string video_path = 1;
+  string driver_name = 2;
+  double fps = 3;
+  double duration = 4;
+  repeated StartFinishCrossing crossings = 5;
+}
+
+message CrossCorrelationResult {
+  double time_a = 1;
+  optional Circle circle_a = 2;
+  optional int32 segment_a = 3;
+
+  optional double best_time_b = 4;
+  optional Circle best_circle_b = 5;
+  optional int32 best_segment_b = 6;
+  optional double best_distance = 7;
+
+  repeated DistancePoint all_distances = 8;
+
+  optional double global_min_time_b = 9;
+  optional double global_min_distance = 10;
+
+  bool circle_a_interpolated = 11;
+  bool circle_b_interpolated = 12;
+  bool no_match = 13;
+
+  optional FrameOCRData ocr_a = 14;
+  optional FrameOCRData ocr_b = 15;
+}
+
+message Circle {
+  int32 x = 1;
+  int32 y = 2;
+  int32 radius = 3;
+}
+
+message DistancePoint {
+  double time_b = 1;
+  double distance = 2;
+}
+
+message FrameOCRData {
+  optional int32 lap_number = 1;
+  bool is_optimal_lap = 2;
+  optional int32 segment_number = 3;
+  optional double lap_time_seconds = 4;
+}
+
+message StartFinishCrossing {
+  int32 frame_index = 1;
+  double video_time = 2;
+  optional int32 lap_before = 3;
+  optional int32 lap_after = 4;
+}
+
+message TurnAnalysis {
+  repeated double times = 1;
+  repeated double angles = 2;
+  repeated double sharpness = 3;
+  repeated TurnApex apexes = 4;
+  double window_seconds = 5;
+}
+
+message TurnApex {
+  double time = 1;
+  double angle = 2;
+  double sharpness = 3;
+  double prominence = 4;
+}

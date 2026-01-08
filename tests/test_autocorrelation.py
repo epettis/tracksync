@@ -4,9 +4,8 @@ import numpy as np
 import pytest
 from tracksync.autocorrelation import (
     binarize_frame,
-    compute_correlation,
-    CorrelationResult,
-    AlignmentPoint,
+    FrameOCRData,
+    StartFinishCrossing,
 )
 
 
@@ -141,85 +140,49 @@ class TestBinarizeFrame:
         assert np.all(binary_custom == 1)
 
 
-class TestComputeCorrelation:
-    """Tests for the compute_correlation function."""
+class TestFrameOCRData:
+    """Tests for FrameOCRData dataclass."""
 
-    def test_identical_frames(self):
-        """Identical frames should have maximum correlation."""
-        frame = np.ones((100, 100), dtype=np.uint8)
-        score = compute_correlation(frame, frame)
-        assert score == 100 * 100  # All pixels match
+    def test_default_values(self):
+        """FrameOCRData should have correct default values."""
+        ocr = FrameOCRData()
+        assert ocr.lap_number is None
+        assert ocr.is_optimal_lap is False
+        assert ocr.segment_number is None
+        assert ocr.lap_time_seconds is None
 
-    def test_inverted_frames(self):
-        """Completely different frames should have zero correlation."""
-        frame_a = np.ones((100, 100), dtype=np.uint8)
-        frame_b = np.zeros((100, 100), dtype=np.uint8)
-        score = compute_correlation(frame_a, frame_b)
-        assert score == 0
-
-    def test_partial_overlap(self):
-        """Partial overlap should give proportional correlation."""
-        frame_a = np.zeros((100, 100), dtype=np.uint8)
-        frame_b = np.zeros((100, 100), dtype=np.uint8)
-
-        # Set top half of both frames to 1
-        frame_a[:50, :] = 1
-        frame_b[:50, :] = 1
-
-        score = compute_correlation(frame_a, frame_b)
-        assert score == 50 * 100  # Only top half matches
-
-    def test_no_overlap(self):
-        """Non-overlapping regions should give zero correlation."""
-        frame_a = np.zeros((100, 100), dtype=np.uint8)
-        frame_b = np.zeros((100, 100), dtype=np.uint8)
-
-        # Set top half of A to 1, bottom half of B to 1
-        frame_a[:50, :] = 1
-        frame_b[50:, :] = 1
-
-        score = compute_correlation(frame_a, frame_b)
-        assert score == 0
-
-    def test_single_pixel_match(self):
-        """Single matching pixel should give correlation of 1."""
-        frame_a = np.zeros((100, 100), dtype=np.uint8)
-        frame_b = np.zeros((100, 100), dtype=np.uint8)
-
-        frame_a[50, 50] = 1
-        frame_b[50, 50] = 1
-
-        score = compute_correlation(frame_a, frame_b)
-        assert score == 1
-
-    def test_returns_integer(self):
-        """Correlation should return an integer."""
-        frame = np.ones((100, 100), dtype=np.uint8)
-        score = compute_correlation(frame, frame)
-        assert isinstance(score, int)
-
-
-class TestDataclasses:
-    """Tests for dataclass structures."""
-
-    def test_correlation_result(self):
-        """CorrelationResult should store all fields."""
-        result = CorrelationResult(
-            best_time=1.5,
-            best_score=1000,
-            all_scores=[(1.0, 800), (1.5, 1000), (2.0, 900)]
+    def test_with_values(self):
+        """FrameOCRData should store all fields."""
+        ocr = FrameOCRData(
+            lap_number=3,
+            is_optimal_lap=False,
+            segment_number=5,
+            lap_time_seconds=65.5
         )
-        assert result.best_time == 1.5
-        assert result.best_score == 1000
-        assert len(result.all_scores) == 3
+        assert ocr.lap_number == 3
+        assert ocr.is_optimal_lap is False
+        assert ocr.segment_number == 5
+        assert ocr.lap_time_seconds == 65.5
 
-    def test_alignment_point(self):
-        """AlignmentPoint should store all fields."""
-        point = AlignmentPoint(
-            time_a=10.0,
-            time_b=12.5,
-            correlation=5000
+    def test_optimal_lap(self):
+        """FrameOCRData should handle optimal lap flag."""
+        ocr = FrameOCRData(is_optimal_lap=True)
+        assert ocr.is_optimal_lap is True
+        assert ocr.lap_number is None
+
+
+class TestStartFinishCrossing:
+    """Tests for StartFinishCrossing dataclass."""
+
+    def test_crossing(self):
+        """StartFinishCrossing should store all fields."""
+        crossing = StartFinishCrossing(
+            frame_index=100,
+            video_time=3.33,
+            lap_before=1,
+            lap_after=2
         )
-        assert point.time_a == 10.0
-        assert point.time_b == 12.5
-        assert point.correlation == 5000
+        assert crossing.frame_index == 100
+        assert crossing.video_time == 3.33
+        assert crossing.lap_before == 1
+        assert crossing.lap_after == 2
