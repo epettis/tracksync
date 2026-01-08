@@ -534,15 +534,28 @@ def _interpolate_lap_times(
         if j == i + 1:
             # Adjacent frames, just check for rollover
             if time_j < time_i - 5.0:  # Rollover threshold: 5 seconds decrease
-                # Rollover detected between i and j
-                # Estimate crossing at midpoint
-                crossing_time = (frame_times[i] + frame_times[j]) / 2
-                crossings.append(StartFinishCrossing(
-                    frame_index=i,
-                    video_time=crossing_time,
-                    lap_before=data[i].lap_number,
-                    lap_after=data[j].lap_number
-                ))
+                # Validate this is a real crossing, not an OCR error:
+                # 1. The new lap time should be small (near start of lap), OR
+                # 2. The lap number should have incremented
+                lap_before = data[i].lap_number
+                lap_after = data[j].lap_number
+                lap_incremented = (
+                    lap_after is not None and
+                    lap_before is not None and
+                    lap_after > lap_before
+                )
+                new_lap_time_small = time_j < 10.0  # Within 10 seconds of lap start
+
+                if lap_incremented or new_lap_time_small:
+                    # Rollover detected between i and j
+                    # Estimate crossing at midpoint
+                    crossing_time = (frame_times[i] + frame_times[j]) / 2
+                    crossings.append(StartFinishCrossing(
+                        frame_index=i,
+                        video_time=crossing_time,
+                        lap_before=lap_before,
+                        lap_after=lap_after
+                    ))
             continue
 
         # Multiple frames between i and j
@@ -552,46 +565,64 @@ def _interpolate_lap_times(
 
         # Check for rollover
         if time_j < time_i - 5.0:
-            # Rollover occurred somewhere between i and j
-            # Estimate where: lap_time reaches ~0 and restarts
+            # Validate this is a real crossing, not an OCR error:
+            # 1. The new lap time should be small (near start of lap), OR
+            # 2. The lap number should have incremented
+            lap_before = data[i].lap_number
+            lap_after = data[j].lap_number
+            lap_incremented = (
+                lap_after is not None and
+                lap_before is not None and
+                lap_after > lap_before
+            )
+            new_lap_time_small = time_j < 10.0  # Within 10 seconds of lap start
 
-            # Method: Find where the time would have been ~0
-            # If lap_time_i is X seconds, car crosses start-finish X seconds later
-            # (assuming constant speed, lap_time increases at ~1 second per second)
-            estimated_crossing_offset = time_i  # seconds after frame i
+            if lap_incremented or new_lap_time_small:
+                # Rollover occurred somewhere between i and j
+                # Estimate where: lap_time reaches ~0 and restarts
 
-            # Find the frame closest to the crossing
-            crossing_video_time = video_time_i + estimated_crossing_offset
-            crossing_frame_idx = i
+                # Method: Find where the time would have been ~0
+                # If lap_time_i is X seconds, car crosses start-finish X seconds later
+                # (assuming constant speed, lap_time increases at ~1 second per second)
+                estimated_crossing_offset = time_i  # seconds after frame i
 
-            for k in range(i + 1, j + 1):
-                if frame_times[k] >= crossing_video_time:
-                    # Crossing happened between k-1 and k
-                    crossing_frame_idx = k - 1 if k > i else i
-                    crossing_video_time = min(crossing_video_time, frame_times[j])
-                    break
+                # Find the frame closest to the crossing
+                crossing_video_time = video_time_i + estimated_crossing_offset
+                crossing_frame_idx = i
+
+                for k in range(i + 1, j + 1):
+                    if frame_times[k] >= crossing_video_time:
+                        # Crossing happened between k-1 and k
+                        crossing_frame_idx = k - 1 if k > i else i
+                        crossing_video_time = min(crossing_video_time, frame_times[j])
+                        break
+                else:
+                    crossing_frame_idx = j - 1
+                    crossing_video_time = frame_times[j]
+
+                crossings.append(StartFinishCrossing(
+                    frame_index=crossing_frame_idx,
+                    video_time=crossing_video_time,
+                    lap_before=lap_before,
+                    lap_after=lap_after
+                ))
+
+                # Interpolate before the crossing
+                for k in range(i + 1, crossing_frame_idx + 1):
+                    elapsed = frame_times[k] - video_time_i
+                    # Lap time increases roughly 1:1 with real time
+                    data[k].lap_time_seconds = time_i + elapsed
+
+                # Interpolate after the crossing
+                for k in range(crossing_frame_idx + 1, j):
+                    elapsed = frame_times[k] - crossing_video_time
+                    # After crossing, lap time starts from ~0
+                    data[k].lap_time_seconds = elapsed
             else:
-                crossing_frame_idx = j - 1
-                crossing_video_time = frame_times[j]
-
-            crossings.append(StartFinishCrossing(
-                frame_index=crossing_frame_idx,
-                video_time=crossing_video_time,
-                lap_before=data[i].lap_number,
-                lap_after=data[j].lap_number
-            ))
-
-            # Interpolate before the crossing
-            for k in range(i + 1, crossing_frame_idx + 1):
-                elapsed = frame_times[k] - video_time_i
-                # Lap time increases roughly 1:1 with real time
-                data[k].lap_time_seconds = time_i + elapsed
-
-            # Interpolate after the crossing
-            for k in range(crossing_frame_idx + 1, j):
-                elapsed = frame_times[k] - crossing_video_time
-                # After crossing, lap time starts from ~0
-                data[k].lap_time_seconds = elapsed
+                # OCR error - treat as no rollover, just interpolate
+                for k in range(i + 1, j):
+                    t = (frame_times[k] - video_time_i) / video_duration
+                    data[k].lap_time_seconds = time_i + t * (time_j - time_i)
 
         else:
             # No rollover - simple linear interpolation
@@ -644,21 +675,32 @@ def find_start_finish_crossings(
         if ocr.lap_time_seconds is not None and prev_lap_time is not None:
             # Rollover: time drops by more than 5 seconds
             if prev_lap_time - ocr.lap_time_seconds > 5.0:
-                # Estimate crossing time between prev and current frame
-                # The crossing happens when lap_time would have been 0
-                # If prev_lap_time is X, crossing is X seconds after prev frame
-                estimated_offset = prev_lap_time
-                crossing_video_time = frame_times[prev_idx] + estimated_offset
+                # Validate this is a real crossing, not an OCR error:
+                # 1. The new lap time should be small (near start of lap), OR
+                # 2. The lap number should have incremented
+                lap_incremented = (
+                    ocr.lap_number is not None and
+                    prev_lap_number is not None and
+                    ocr.lap_number > prev_lap_number
+                )
+                new_lap_time_small = ocr.lap_time_seconds < 10.0  # Within 10 seconds of lap start
 
-                # Clamp to between the two frames
-                crossing_video_time = min(crossing_video_time, frame_times[i])
+                if lap_incremented or new_lap_time_small:
+                    # Estimate crossing time between prev and current frame
+                    # The crossing happens when lap_time would have been 0
+                    # If prev_lap_time is X, crossing is X seconds after prev frame
+                    estimated_offset = prev_lap_time
+                    crossing_video_time = frame_times[prev_idx] + estimated_offset
 
-                crossings.append(StartFinishCrossing(
-                    frame_index=prev_idx,
-                    video_time=crossing_video_time,
-                    lap_before=prev_lap_number,
-                    lap_after=ocr.lap_number
-                ))
+                    # Clamp to between the two frames
+                    crossing_video_time = min(crossing_video_time, frame_times[i])
+
+                    crossings.append(StartFinishCrossing(
+                        frame_index=prev_idx,
+                        video_time=crossing_video_time,
+                        lap_before=prev_lap_number,
+                        lap_after=ocr.lap_number
+                    ))
 
         if ocr.lap_time_seconds is not None:
             prev_lap_time = ocr.lap_time_seconds

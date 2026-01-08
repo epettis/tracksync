@@ -3,11 +3,32 @@
 Video alignment utility for automatically syncing two racing videos.
 
 This tool uses cross-correlation of red dot positions on the track overlay
-to find matching timestamps between videos.
+to find matching timestamps between videos. It can also generate synchronized
+comparison videos using the tracksync library.
+
+Modes:
+    1. Alignment mode (default): Output timestamp correlations between videos
+    2. Sync mode (--sync): Generate tracksync-compatible CSV with speed ratios
 
 Usage:
+    # Basic alignment (output to stdout)
+    python video_align.py video_a.mp4 video_b.mp4
+
+    # Output alignment to CSV file
     python video_align.py video_a.mp4 video_b.mp4 --output timestamps.csv
+
+    # Interactive debug mode
     python video_align.py video_a.mp4 video_b.mp4 --debug
+
+    # Generate sync timestamps for tracksync
+    python video_align.py video_a.mp4 video_b.mp4 --sync --output sync.csv
+
+    # Generate sync timestamps and create comparison video
+    python video_align.py video_a.mp4 video_b.mp4 --sync --generate-video \\
+        --video-dir ./videos --output-dir ./output
+
+    # Custom sync interval (default is 3 seconds)
+    python video_align.py video_a.mp4 video_b.mp4 --sync --max-sync-interval 5.0
 """
 
 import argparse
@@ -38,28 +59,95 @@ from tracksync.autocorrelation import (
 
 @dataclass
 class FrameData:
-    """Pre-computed data for a single frame."""
+    """Pre-computed data for a single frame.
+
+    The frame and red_mask fields are optional to save memory during sync mode.
+    They are only populated in debug mode where visualization is needed.
+    """
     time: float
-    frame: np.ndarray  # Original RGB frame
     circle: Optional[tuple[int, int, int]]  # (x, y, radius) or None
     segment: Optional[int]  # Segment number or None
-    red_mask: Optional[np.ndarray] = None  # Binary mask of red pixels in search region
+    frame: Optional[np.ndarray] = None  # Original RGB frame (only in debug mode)
+    red_mask: Optional[np.ndarray] = None  # Binary mask of red pixels (only in debug mode)
     ocr_data: Optional[FrameOCRData] = None  # OCR-extracted lap/segment/time info
 
 
 @dataclass
+class SyncPoint:
+    """A synchronization point between two videos."""
+    time_a: float  # Timestamp in video A
+    time_b: float  # Corresponding timestamp in video B
+    label: str  # Description (e.g., "start", "segment_5", "periodic")
+    speed: float = 1.0  # Speed ratio (time_b progression / time_a progression)
+
+
+@dataclass
+class SyncResult:
+    """Result of synchronization analysis."""
+    sync_points: list[SyncPoint]
+    trim_start_a: float  # Start time to trim video A
+    trim_end_a: float  # End time to trim video A
+    trim_start_b: float  # Start time to trim video B
+    trim_end_b: float  # End time to trim video B
+    crossings_a: list[StartFinishCrossing]
+    crossings_b: list[StartFinishCrossing]
+
+
+@dataclass
+class VideoFeatures:
+    """Cached features extracted from a single video.
+
+    This dataclass stores all the expensive-to-compute features for a video,
+    allowing O(n) extraction instead of O(n^2) when comparing multiple videos.
+    """
+    video_path: str
+    driver_name: str  # Extracted from filename
+    fps: float
+    frames: list[FrameData]
+    frame_times: list[float]
+    interpolated_ocr: list[FrameOCRData]
+    crossings: list[StartFinishCrossing]
+    # Pre-computed position arrays for vectorized correlation
+    positions: list[Optional[tuple[int, int]]]  # Interpolated circle positions
+    pos_array: np.ndarray  # Shape (n_frames, 2), NaN for missing
+
+
+@dataclass
+class TurnApex:
+    """A detected turn apex (local maximum in sharpness)."""
+    time: float  # Video timestamp
+    angle: float  # Interior angle in degrees (smaller = sharper turn)
+    sharpness: float  # 180 - angle (higher = sharper turn)
+    prominence: float  # Peak prominence (how significant this apex is)
+
+
+@dataclass
+class TurnAnalysis:
+    """Turn detection analysis for a video."""
+    times: list[float]  # Timestamps for each angle measurement
+    angles: list[float]  # Interior angles in degrees
+    sharpness: list[float]  # 180 - angle for each measurement
+    apexes: list[TurnApex]  # Detected turn apexes (local maxima in sharpness)
+    window_seconds: float  # Window size used for calculation
+
+
+@dataclass
 class CrossCorrelationResult:
-    """Result of cross-correlating one frame against all frames in another video."""
+    """Result of cross-correlating one frame against all frames in another video.
+
+    The frame_a and best_frame_b fields are optional to save memory during sync mode.
+    They are only populated in debug mode where visualization is needed.
+    """
     time_a: float
-    frame_a: np.ndarray
     circle_a: Optional[tuple[int, int, int]]
     segment_a: Optional[int]
     best_time_b: Optional[float]  # None if no match found
-    best_frame_b: Optional[np.ndarray]  # None if no match found
     best_circle_b: Optional[tuple[int, int, int]]
     best_segment_b: Optional[int]
     best_distance: Optional[float]  # None if no match found
     all_distances: list[tuple[float, float]]  # (time_b, distance) for all frames in B
+    frame_a: Optional[np.ndarray] = None  # Original frame (only in debug mode)
+    best_frame_b: Optional[np.ndarray] = None  # Best matching frame (only in debug mode)
     red_mask_a: Optional[np.ndarray] = None  # Binary mask of red pixels for frame A
     red_mask_b: Optional[np.ndarray] = None  # Binary mask of red pixels for frame B
     circle_a_interpolated: bool = False  # True if circle_a was interpolated
@@ -71,6 +159,233 @@ class CrossCorrelationResult:
     # OCR data for both frames
     ocr_a: Optional[FrameOCRData] = None
     ocr_b: Optional[FrameOCRData] = None
+
+
+def calculate_interior_angle(p1: tuple, p2: tuple, p3: tuple) -> float:
+    """
+    Calculate the interior angle at p2 formed by points p1 -> p2 -> p3.
+
+    Args:
+        p1: First point (x, y)
+        p2: Middle point (x, y) - the vertex
+        p3: Third point (x, y)
+
+    Returns:
+        Interior angle in degrees (0-180). Smaller angle = sharper turn.
+    """
+    # Vectors from p2 to p1 and p2 to p3
+    v1 = np.array([p1[0] - p2[0], p1[1] - p2[1]], dtype=float)
+    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]], dtype=float)
+
+    # Calculate angle using dot product
+    dot = np.dot(v1, v2)
+    mag1 = np.linalg.norm(v1)
+    mag2 = np.linalg.norm(v2)
+
+    if mag1 == 0 or mag2 == 0:
+        return 180.0  # No movement, straight line
+
+    cos_angle = np.clip(dot / (mag1 * mag2), -1.0, 1.0)
+    angle = np.arccos(cos_angle)
+
+    return float(np.degrees(angle))
+
+
+def compute_turn_analysis(
+    positions: list[Optional[tuple[int, int]]],
+    frame_times: list[float],
+    fps: float,
+    window_seconds: float = 3.0,
+    min_prominence: float = 5.0,
+    min_sharpness: float = 45.0
+) -> TurnAnalysis:
+    """
+    Compute turn analysis from circle positions.
+
+    For each point at time t, we look at points at t-window and t+window
+    and calculate the interior angle. Local maxima in sharpness (180 - angle)
+    indicate turn apexes.
+
+    Args:
+        positions: List of (x, y) positions (or None for missing)
+        frame_times: List of timestamps
+        fps: Frames per second
+        window_seconds: Time offset for before/after points
+        min_prominence: Minimum prominence for peak detection
+        min_sharpness: Minimum sharpness (180 - angle) to qualify as a turn apex.
+                       Default 45.0 means interior angle must be < 135 degrees.
+
+    Returns:
+        TurnAnalysis with angles, sharpness values, and detected apexes
+    """
+    from scipy.signal import find_peaks
+
+    n = len(positions)
+    window_frames = int(window_seconds * fps)
+
+    angle_times = []
+    angles = []
+
+    for i in range(window_frames, n - window_frames):
+        p1 = positions[i - window_frames]
+        p2 = positions[i]
+        p3 = positions[i + window_frames]
+
+        # Skip if any position is missing
+        if p1 is None or p2 is None or p3 is None:
+            continue
+
+        angle = calculate_interior_angle(p1, p2, p3)
+        angle_times.append(frame_times[i])
+        angles.append(angle)
+
+    # Calculate sharpness (higher = sharper turn)
+    sharpness = [180.0 - a for a in angles]
+
+    # Find turn apexes (local maxima in sharpness)
+    apexes = []
+    if len(sharpness) >= 3:
+        peaks, properties = find_peaks(sharpness, prominence=min_prominence, distance=3)
+
+        for idx, peak_idx in enumerate(peaks):
+            peak_sharpness = sharpness[peak_idx]
+            # Only include apexes where sharpness exceeds threshold
+            # (i.e., interior angle < 180 - min_sharpness)
+            if peak_sharpness >= min_sharpness:
+                apexes.append(TurnApex(
+                    time=angle_times[peak_idx],
+                    angle=angles[peak_idx],
+                    sharpness=peak_sharpness,
+                    prominence=float(properties['prominences'][idx])
+                ))
+
+    return TurnAnalysis(
+        times=angle_times,
+        angles=angles,
+        sharpness=sharpness,
+        apexes=apexes,
+        window_seconds=window_seconds
+    )
+
+
+def create_turn_angle_graph(
+    turn_analysis: TurnAnalysis,
+    current_time: float,
+    width: int,
+    height: int,
+    label: str = "A"
+) -> np.ndarray:
+    """
+    Create a graph showing the turn angle/sharpness time series.
+
+    Shows:
+    - Sharpness values as a line graph
+    - Turn apexes as highlighted points
+    - Current time position as a vertical line
+
+    Args:
+        turn_analysis: TurnAnalysis containing angles and apexes
+        current_time: Current video timestamp to highlight
+        width: Graph width in pixels
+        height: Graph height in pixels
+        label: Video label (A or B)
+
+    Returns:
+        BGR image of the graph
+    """
+    graph = np.zeros((height, width, 3), dtype=np.uint8)
+    graph[:] = (30, 30, 30)  # Dark gray background
+
+    if not turn_analysis.times:
+        cv2.putText(graph, f"Turn Angles ({label}): No data", (10, height // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1)
+        return graph
+
+    times = turn_analysis.times
+    sharpness = turn_analysis.sharpness
+    apexes = turn_analysis.apexes
+
+    min_time = min(times)
+    max_time = max(times)
+    time_range = max_time - min_time
+    if time_range == 0:
+        time_range = 1.0
+
+    # Sharpness ranges from 0 (straight) to ~180 (U-turn)
+    min_sharp = 0
+    max_sharp = max(sharpness) if sharpness else 100
+    if max_sharp == min_sharp:
+        max_sharp = min_sharp + 1
+
+    # Margins
+    left_margin = 50
+    right_margin = 10
+    top_margin = 25
+    bottom_margin = 25
+    plot_width = width - left_margin - right_margin
+    plot_height = height - top_margin - bottom_margin
+
+    def time_to_x(t):
+        return int(left_margin + ((t - min_time) / time_range) * plot_width)
+
+    def sharp_to_y(s):
+        return int(top_margin + plot_height - ((s - min_sharp) / (max_sharp - min_sharp)) * plot_height)
+
+    # Draw grid lines
+    for i in range(5):
+        y = top_margin + int(i * plot_height / 4)
+        cv2.line(graph, (left_margin, y), (width - right_margin, y), (50, 50, 50), 1)
+
+    # Draw sharpness line
+    points = []
+    for t, s in zip(times, sharpness):
+        x = time_to_x(t)
+        y = sharp_to_y(s)
+        points.append((x, y))
+
+    if len(points) > 1:
+        for i in range(len(points) - 1):
+            cv2.line(graph, points[i], points[i + 1], (100, 180, 100), 1)  # Green line
+
+    # Draw turn apexes as highlighted circles
+    for apex in apexes:
+        x = time_to_x(apex.time)
+        y = sharp_to_y(apex.sharpness)
+        # Size based on prominence
+        radius = max(3, min(8, int(apex.prominence / 10)))
+        cv2.circle(graph, (x, y), radius, (0, 255, 255), -1)  # Yellow filled
+        cv2.circle(graph, (x, y), radius, (0, 200, 200), 1)  # Darker outline
+
+    # Draw current time indicator
+    if min_time <= current_time <= max_time:
+        x_current = time_to_x(current_time)
+        cv2.line(graph, (x_current, top_margin), (x_current, height - bottom_margin),
+                 (0, 100, 255), 2)  # Orange vertical line
+
+        # Find sharpness at current time (nearest)
+        nearest_idx = min(range(len(times)), key=lambda i: abs(times[i] - current_time))
+        if abs(times[nearest_idx] - current_time) < 1.0:  # Within 1 second
+            current_sharpness = sharpness[nearest_idx]
+            current_angle = turn_analysis.angles[nearest_idx]
+            # Draw current point
+            y_current = sharp_to_y(current_sharpness)
+            cv2.circle(graph, (x_current, y_current), 5, (0, 100, 255), -1)
+
+    # Labels
+    cv2.putText(graph, f"Turn Sharpness ({label})", (left_margin, 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+
+    # Y-axis labels
+    cv2.putText(graph, f"{max_sharp:.0f}", (5, top_margin + 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    cv2.putText(graph, "0", (5, height - bottom_margin),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+
+    # Apex count
+    cv2.putText(graph, f"Apexes: {len(apexes)}", (width - 80, 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+
+    return graph
 
 
 def compute_red_mask(
@@ -122,16 +437,50 @@ Examples:
     # Basic alignment (output to stdout)
     python video_align.py video_a.mp4 video_b.mp4
 
-    # Output to CSV file
+    # Output alignment to CSV file
     python video_align.py video_a.mp4 video_b.mp4 --output timestamps.csv
 
-    # Interactive debug mode
+    # Interactive debug mode with visualization
     python video_align.py video_a.mp4 video_b.mp4 --debug
+
+    # Quick test with first 20 seconds only
+    python video_align.py video_a.mp4 video_b.mp4 --short --debug
+
+Sync Mode (--sync):
+    Generates tracksync-compatible CSV with speed ratios for video scaling.
+    Videos are trimmed to start-finish line crossings and synchronized at
+    segment changes with periodic sync points to maintain alignment.
+
+    # Generate sync timestamps CSV
+    python video_align.py video_a.mp4 video_b.mp4 --sync --output sync.csv
+
+    # Generate sync timestamps and create comparison video
+    python video_align.py video_a.mp4 video_b.mp4 --sync --generate-video \\
+        --video-dir ./videos --output-dir ./output
+
+    # Custom sync interval (default: 3.0 seconds)
+    python video_align.py video_a.mp4 video_b.mp4 --sync --max-sync-interval 5.0
+
+    # Full pipeline: analyze and generate video in one command
+    python video_align.py driver1.mp4 driver2.mp4 --sync --generate-video \\
+        --video-dir /path/to/videos --output-dir /path/to/output \\
+        --output sync_timestamps.csv
+
+Multi-Video Sync Mode (--sync-all):
+    Process multiple videos efficiently by extracting features once per video.
+    Generates all pairwise sync CSVs with O(n) feature extraction.
+
+    # Sync all videos in a directory
+    python video_align.py --sync-all video1.mp4 video2.mp4 video3.mp4 \\
+        --output-dir ./sync_output
+
+    # With video generation
+    python video_align.py --sync-all *.mp4 --generate-video --output-dir ./output
         """
     )
 
-    parser.add_argument("video_a", help="Path to reference video (video A)")
-    parser.add_argument("video_b", help="Path to target video (video B)")
+    parser.add_argument("video_a", nargs="?", help="Path to reference video (video A)")
+    parser.add_argument("video_b", nargs="?", help="Path to target video (video B)")
 
     parser.add_argument(
         "--output", "-o",
@@ -198,6 +547,46 @@ Examples:
         help="Analyze only the first 20 seconds of video (for faster debugging)"
     )
 
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Generate synchronization timestamps and output tracksync CSV format"
+    )
+
+    parser.add_argument(
+        "--generate-video",
+        action="store_true",
+        help="Generate synchronized comparison video using tracksync (requires --sync)"
+    )
+
+    parser.add_argument(
+        "--video-dir",
+        type=str,
+        help="Directory containing source videos (for --generate-video)"
+    )
+
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=".",
+        help="Directory for output videos (for --generate-video, default: current directory)"
+    )
+
+    parser.add_argument(
+        "--max-sync-interval",
+        type=float,
+        default=3.0,
+        help="Maximum interval between sync points in seconds (default: 3.0)"
+    )
+
+    parser.add_argument(
+        "--sync-all",
+        nargs="+",
+        metavar="VIDEO",
+        help="Process multiple videos efficiently with O(n) feature extraction. "
+             "Pass all video paths and generates all pairwise sync CSVs."
+    )
+
     return parser.parse_args(argv)
 
 
@@ -246,7 +635,8 @@ def extract_frame_data(
     red_max_gb: int,
     progress_prefix: str = "",
     use_native_fps: bool = False,
-    max_duration: Optional[float] = None
+    max_duration: Optional[float] = None,
+    store_frames: bool = True
 ) -> tuple[list[FrameData], float]:
     """
     Extract frame data (frame, red circle, segment) from a video.
@@ -259,6 +649,8 @@ def extract_frame_data(
         progress_prefix: Prefix for progress output
         use_native_fps: If True, extract every frame at native video FPS
         max_duration: If set, only extract frames up to this duration in seconds
+        store_frames: If True, store RGB frames in FrameData (uses more memory).
+                     Set to False for sync mode to reduce memory usage.
 
     Returns:
         Tuple of (list of FrameData, actual fps used)
@@ -269,7 +661,6 @@ def extract_frame_data(
 
     try:
         duration, fps, frame_count = get_video_info(video)
-        frames: list[FrameData] = []
 
         # Apply max_duration limit if specified
         effective_duration = duration
@@ -286,32 +677,51 @@ def extract_frame_data(
             actual_interval = interval
             total_frames = int(effective_duration / interval)
 
-        time = 0.0
-        frame_num = 0
+        # Preallocate list for better performance
+        frames: list[FrameData] = [None] * total_frames  # type: ignore
+        actual_count = 0
 
-        while time < effective_duration:
-            frame_num += 1
-            pct = (frame_num / total_frames) * 100 if total_frames > 0 else 0
-            print(f"\r{progress_prefix}Extracting frames: {pct:5.1f}% ({frame_num}/{total_frames})   ", end="", file=sys.stderr)
+        time = 0.0
+        frame_idx = 0
+
+        while time < effective_duration and frame_idx < total_frames:
+            pct = ((frame_idx + 1) / total_frames) * 100 if total_frames > 0 else 0
+            print(f"\r{progress_prefix}Extracting frames: {pct:5.1f}% ({frame_idx + 1}/{total_frames})   ", end="", file=sys.stderr)
 
             frame = get_frame_at_time(video, time)
             if frame is not None:
                 circle = find_red_circle(frame, red_min, red_max_gb)
                 segment = detect_segment_number(frame)
-                red_mask = compute_red_mask(frame, red_min, red_max_gb)
                 ocr_data = extract_frame_ocr(frame)
-                frames.append(FrameData(
-                    time=time,
-                    frame=frame,
-                    circle=circle,
-                    segment=segment,
-                    red_mask=red_mask,
-                    ocr_data=ocr_data
-                ))
 
+                # Only store frame and red_mask if requested (debug mode)
+                if store_frames:
+                    red_mask = compute_red_mask(frame, red_min, red_max_gb)
+                    frames[frame_idx] = FrameData(
+                        time=time,
+                        circle=circle,
+                        segment=segment,
+                        frame=frame,
+                        red_mask=red_mask,
+                        ocr_data=ocr_data
+                    )
+                else:
+                    frames[frame_idx] = FrameData(
+                        time=time,
+                        circle=circle,
+                        segment=segment,
+                        ocr_data=ocr_data
+                    )
+                actual_count += 1
+
+            frame_idx += 1
             time += actual_interval
 
         print(file=sys.stderr)  # Newline after progress
+
+        # Trim list to actual count (in case some frames were skipped)
+        frames = [f for f in frames if f is not None]
+
         return frames, fps
 
     finally:
@@ -384,6 +794,306 @@ def interpolate_missing_circles(frames: list[FrameData]) -> list[Optional[tuple[
                 result.append(None)
 
     return result
+
+
+def extract_video_features(
+    video_path: str,
+    red_min: int = 200,
+    red_max_gb: int = 80,
+    max_duration: Optional[float] = None,
+    progress_prefix: str = ""
+) -> VideoFeatures:
+    """
+    Extract all features from a video for later pairwise comparison.
+
+    This function performs all expensive operations (frame extraction, OCR,
+    circle detection) once per video, allowing O(n) extraction instead of
+    O(n^2) when comparing multiple videos.
+
+    Args:
+        video_path: Path to video file
+        red_min: Minimum R value for red detection
+        red_max_gb: Maximum G/B values for red detection
+        max_duration: If set, only extract frames up to this duration
+        progress_prefix: Prefix for progress output
+
+    Returns:
+        VideoFeatures with all extracted and interpolated data
+    """
+    import os
+
+    driver_name = os.path.splitext(os.path.basename(video_path))[0]
+
+    print(f"{progress_prefix}Extracting features from: {video_path}", file=sys.stderr)
+
+    # Extract frame data at native FPS (don't store frames to save memory)
+    frames, fps = extract_frame_data(
+        video_path, 1.0, red_min, red_max_gb,
+        f"{progress_prefix}  ", use_native_fps=True, max_duration=max_duration,
+        store_frames=False
+    )
+
+    # Get frame times and OCR data
+    frame_times = [f.time for f in frames]
+    ocr_list = [f.ocr_data for f in frames]
+
+    # Interpolate OCR and detect crossings
+    print(f"{progress_prefix}  Interpolating OCR data...", file=sys.stderr)
+    interpolated_ocr, crossings = interpolate_ocr_data(ocr_list, frame_times, fps)
+
+    # Update frame data with interpolated OCR
+    for i, ocr in enumerate(interpolated_ocr):
+        frames[i].ocr_data = ocr
+
+    # Interpolate missing circle positions
+    print(f"{progress_prefix}  Interpolating circle positions...", file=sys.stderr)
+    positions = interpolate_missing_circles(frames)
+
+    # Build position array for vectorized correlation
+    n = len(frames)
+    pos_array = np.full((n, 2), np.nan, dtype=np.float64)
+    for i, pos in enumerate(positions):
+        if pos is not None:
+            pos_array[i] = pos
+
+    # Statistics
+    detected = sum(1 for f in frames if f.circle is not None)
+    interpolated = sum(1 for i, p in enumerate(positions) if p is not None and frames[i].circle is None)
+    unmatchable = sum(1 for p in positions if p is None)
+    print(f"{progress_prefix}  Circles: {detected} detected, {interpolated} interpolated, {unmatchable} unmatchable", file=sys.stderr)
+    print(f"{progress_prefix}  Crossings: {len(crossings)} start-finish crossings detected", file=sys.stderr)
+    for c in crossings:
+        lap_info = f"Lap {c.lap_before} -> {c.lap_after}" if c.lap_before and c.lap_after else "?"
+        print(f"{progress_prefix}    {c.video_time:.2f}s ({lap_info})", file=sys.stderr)
+
+    return VideoFeatures(
+        video_path=video_path,
+        driver_name=driver_name,
+        fps=fps,
+        frames=frames,
+        frame_times=frame_times,
+        interpolated_ocr=interpolated_ocr,
+        crossings=crossings,
+        positions=positions,
+        pos_array=pos_array
+    )
+
+
+def compute_cross_correlations_from_features(
+    features_a: VideoFeatures,
+    features_b: VideoFeatures,
+    window_seconds: float = 20.0
+) -> list[CrossCorrelationResult]:
+    """
+    Compute cross-correlation using pre-extracted VideoFeatures.
+
+    This is an optimized version of compute_cross_correlations that uses
+    pre-computed position arrays from VideoFeatures, avoiding redundant
+    interpolation and array construction.
+
+    Args:
+        features_a: Pre-extracted features from video A
+        features_b: Pre-extracted features from video B
+        window_seconds: Match against frames within +/- this many seconds
+
+    Returns:
+        List of CrossCorrelationResult for each frame in A
+    """
+    frames_a = features_a.frames
+    frames_b = features_b.frames
+    crossings_a = features_a.crossings
+    crossings_b = features_b.crossings
+    positions_a = features_a.positions
+    positions_b = features_b.positions
+    pos_array_a = features_a.pos_array
+    pos_array_b = features_b.pos_array
+
+    # Build crossing offset map
+    crossing_offsets: list[tuple[float, float, float]] = []
+
+    if crossings_a and crossings_b:
+        for ca in crossings_a:
+            if ca.lap_before is None or ca.lap_after is None:
+                continue
+            for cb in crossings_b:
+                if cb.lap_before == ca.lap_before and cb.lap_after == ca.lap_after:
+                    offset = cb.video_time - ca.video_time
+                    crossing_offsets.append((ca.video_time, float('inf'), offset))
+                    print(f"\n  Crossing sync: Lap {ca.lap_before}->{ca.lap_after} "
+                          f"A={ca.video_time:.2f}s B={cb.video_time:.2f}s offset={offset:+.2f}s",
+                          file=sys.stderr)
+                    break
+
+        crossing_offsets.sort(key=lambda x: x[0])
+        for i in range(len(crossing_offsets) - 1):
+            start, _, offset = crossing_offsets[i]
+            next_start = crossing_offsets[i + 1][0]
+            crossing_offsets[i] = (start, next_start, offset)
+
+    n_a = len(frames_a)
+    n_b = len(frames_b)
+
+    # Compute distance matrix using pre-computed position arrays
+    print("  Computing distance matrix...", file=sys.stderr)
+    diff = pos_array_a[:, None, :] - pos_array_b[None, :, :]
+    distance_matrix = np.sqrt(np.sum(diff * diff, axis=2))
+    distance_matrix = np.where(np.isnan(distance_matrix), 10000.0, distance_matrix)
+
+    valid_a = ~np.isnan(pos_array_a[:, 0])
+    valid_b = ~np.isnan(pos_array_b[:, 0])
+
+    times_a = np.array(features_a.frame_times)
+    times_b = np.array(features_b.frame_times)
+
+    window_offsets = np.zeros(n_a, dtype=np.float64)
+    if crossing_offsets:
+        for i, time_a in enumerate(times_a):
+            for start_a, end_a, offset in crossing_offsets:
+                if start_a <= time_a < end_a:
+                    window_offsets[i] = offset
+                    break
+
+    print("  Finding best matches...", file=sys.stderr)
+
+    results: list[CrossCorrelationResult] = []
+    prev_best_time: Optional[float] = None
+
+    for i, fa in enumerate(frames_a):
+        pct = ((i + 1) / n_a) * 100
+        print(f"\rCross-correlating: {pct:5.1f}% ({i + 1}/{n_a})   ", end="", file=sys.stderr)
+
+        time_a = fa.time
+
+        if not valid_a[i]:
+            results.append(CrossCorrelationResult(
+                time_a=fa.time,
+                frame_a=fa.frame,
+                circle_a=None,
+                segment_a=fa.segment,
+                best_time_b=None,
+                best_frame_b=None,
+                best_circle_b=None,
+                best_segment_b=None,
+                best_distance=None,
+                all_distances=[],
+                red_mask_a=fa.red_mask,
+                red_mask_b=None,
+                circle_a_interpolated=False,
+                circle_b_interpolated=False,
+                no_match=True,
+                ocr_a=fa.ocr_data,
+                ocr_b=None
+            ))
+            continue
+
+        distances = distance_matrix[i]
+        all_distances = list(zip(times_b.tolist(), distances.tolist()))
+
+        global_min_idx = int(np.argmin(distances))
+        global_min_distance = distances[global_min_idx]
+
+        window_center = time_a + window_offsets[i]
+        window_mask = (times_b >= window_center - window_seconds) & (times_b <= window_center + window_seconds)
+
+        if not np.any(window_mask):
+            pos_a = positions_a[i]
+            results.append(CrossCorrelationResult(
+                time_a=fa.time,
+                frame_a=fa.frame,
+                circle_a=fa.circle if fa.circle is not None else (pos_a[0], pos_a[1], 5) if pos_a else None,
+                segment_a=fa.segment,
+                best_time_b=None,
+                best_frame_b=None,
+                best_circle_b=None,
+                best_segment_b=None,
+                best_distance=None,
+                all_distances=all_distances,
+                red_mask_a=fa.red_mask,
+                red_mask_b=None,
+                circle_a_interpolated=fa.circle is None,
+                circle_b_interpolated=False,
+                no_match=True,
+                global_min_time_b=frames_b[global_min_idx].time if global_min_distance < 10000 else None,
+                global_min_distance=global_min_distance if global_min_distance < 10000 else None,
+                ocr_a=fa.ocr_data,
+                ocr_b=None
+            ))
+            continue
+
+        windowed_distances = np.where(window_mask, distances, np.inf)
+        best_idx = int(np.argmin(windowed_distances))
+        best_distance = windowed_distances[best_idx]
+
+        if best_distance == np.inf:
+            pos_a = positions_a[i]
+            results.append(CrossCorrelationResult(
+                time_a=fa.time,
+                frame_a=fa.frame,
+                circle_a=fa.circle if fa.circle is not None else (pos_a[0], pos_a[1], 5) if pos_a else None,
+                segment_a=fa.segment,
+                best_time_b=None,
+                best_frame_b=None,
+                best_circle_b=None,
+                best_segment_b=None,
+                best_distance=None,
+                all_distances=all_distances,
+                red_mask_a=fa.red_mask,
+                red_mask_b=None,
+                circle_a_interpolated=fa.circle is None,
+                circle_b_interpolated=False,
+                no_match=True,
+                global_min_time_b=frames_b[global_min_idx].time if global_min_distance < 10000 else None,
+                global_min_distance=global_min_distance if global_min_distance < 10000 else None,
+                ocr_a=fa.ocr_data,
+                ocr_b=None
+            ))
+            continue
+
+        if prev_best_time is not None and times_b[best_idx] < prev_best_time:
+            forward_mask = window_mask & (times_b >= prev_best_time)
+            if np.any(forward_mask):
+                forward_distances = np.where(forward_mask, distances, np.inf)
+                best_idx = int(np.argmin(forward_distances))
+                best_distance = forward_distances[best_idx]
+
+        best_fb = frames_b[best_idx]
+        prev_best_time = best_fb.time
+
+        circle_a_interpolated = fa.circle is None
+        circle_b_interpolated = best_fb.circle is None
+
+        pos_a = positions_a[i]
+        circle_a = fa.circle if fa.circle is not None else (pos_a[0], pos_a[1], 5) if pos_a else None
+        pos_b = positions_b[best_idx]
+        circle_b = best_fb.circle if best_fb.circle is not None else (pos_b[0], pos_b[1], 5) if pos_b is not None else None
+
+        global_min_time = frames_b[global_min_idx].time if global_min_distance < 10000 else None
+        global_min_dist = global_min_distance if global_min_distance < 10000 else None
+
+        results.append(CrossCorrelationResult(
+            time_a=fa.time,
+            frame_a=fa.frame,
+            circle_a=circle_a,
+            segment_a=fa.segment,
+            best_time_b=best_fb.time,
+            best_frame_b=best_fb.frame,
+            best_circle_b=circle_b,
+            best_segment_b=best_fb.segment,
+            best_distance=best_distance,
+            all_distances=all_distances,
+            red_mask_a=fa.red_mask,
+            red_mask_b=best_fb.red_mask,
+            circle_a_interpolated=circle_a_interpolated,
+            circle_b_interpolated=circle_b_interpolated,
+            no_match=False,
+            global_min_time_b=global_min_time,
+            global_min_distance=global_min_dist,
+            ocr_a=fa.ocr_data,
+            ocr_b=best_fb.ocr_data
+        ))
+
+    print(file=sys.stderr)
+    return results
 
 
 def compute_cross_correlations(
@@ -675,6 +1385,414 @@ def compute_cross_correlations(
     return results
 
 
+def generate_sync_points(
+    results: list[CrossCorrelationResult],
+    crossings_a: list[StartFinishCrossing],
+    crossings_b: list[StartFinishCrossing],
+    max_interval: float = 3.0
+) -> SyncResult:
+    """
+    Generate synchronization points for video scaling.
+
+    The synchronization strategy:
+    1. First timestamp: when video A crosses start-finish (first crossing)
+       - All frames/audio before this are dropped from both videos
+    2. Last timestamp: when video A crosses start-finish for second time
+       - All frames/audio after this are dropped from both videos
+    3. Segment changes: synchronize at every segment transition
+    4. Periodic: ensure at least one sync point every max_interval seconds
+
+    Args:
+        results: Cross-correlation results from compute_cross_correlations
+        crossings_a: Start-finish crossings in video A
+        crossings_b: Start-finish crossings in video B
+        max_interval: Maximum time between sync points in video A
+
+    Returns:
+        SyncResult with sync points and trim information
+    """
+    if not results:
+        return SyncResult(
+            sync_points=[],
+            trim_start_a=0.0,
+            trim_end_a=0.0,
+            trim_start_b=0.0,
+            trim_end_b=0.0,
+            crossings_a=crossings_a,
+            crossings_b=crossings_b
+        )
+
+    # Step 1: Determine trim points from start-finish crossings
+    # We need at least 2 crossings in video A to define the lap
+    if len(crossings_a) >= 2:
+        trim_start_a = crossings_a[0].video_time
+        trim_end_a = crossings_a[1].video_time
+    elif len(crossings_a) == 1:
+        # Only one crossing - use it as start, use end of video
+        trim_start_a = crossings_a[0].video_time
+        trim_end_a = results[-1].time_a
+    else:
+        # No crossings detected - use full video
+        trim_start_a = results[0].time_a
+        trim_end_a = results[-1].time_a
+
+    # Find corresponding trim points in video B
+    trim_start_b = None
+    trim_end_b = None
+
+    # Find the result closest to trim_start_a
+    for r in results:
+        if r.time_a >= trim_start_a and r.best_time_b is not None:
+            trim_start_b = r.best_time_b
+            break
+
+    # Find the result closest to trim_end_a
+    for r in reversed(results):
+        if r.time_a <= trim_end_a and r.best_time_b is not None:
+            trim_end_b = r.best_time_b
+            break
+
+    # Fallback if no matches found
+    if trim_start_b is None:
+        for r in results:
+            if r.best_time_b is not None:
+                trim_start_b = r.best_time_b
+                break
+    if trim_end_b is None:
+        for r in reversed(results):
+            if r.best_time_b is not None:
+                trim_end_b = r.best_time_b
+                break
+
+    # Final fallback
+    trim_start_b = trim_start_b or 0.0
+    trim_end_b = trim_end_b or 0.0
+
+    print(f"\nTrim points:", file=sys.stderr)
+    print(f"  Video A: {trim_start_a:.2f}s to {trim_end_a:.2f}s", file=sys.stderr)
+    print(f"  Video B: {trim_start_b:.2f}s to {trim_end_b:.2f}s", file=sys.stderr)
+
+    # Step 2: Collect sync points
+    sync_points: list[SyncPoint] = []
+
+    # Add start point
+    sync_points.append(SyncPoint(
+        time_a=trim_start_a,
+        time_b=trim_start_b,
+        label="start"
+    ))
+
+    # Step 3: Find segment changes and add sync points
+    prev_segment = None
+    for r in results:
+        # Skip results outside our trim window
+        if r.time_a < trim_start_a or r.time_a > trim_end_a:
+            continue
+        if r.no_match or r.best_time_b is None:
+            continue
+
+        # Check for segment change
+        current_segment = r.ocr_a.segment_number if r.ocr_a else None
+        if current_segment is not None and current_segment != prev_segment and prev_segment is not None:
+            # Segment changed - add sync point
+            sync_points.append(SyncPoint(
+                time_a=r.time_a,
+                time_b=r.best_time_b,
+                label=f"segment_{current_segment}"
+            ))
+        prev_segment = current_segment
+
+    # Add end point
+    sync_points.append(SyncPoint(
+        time_a=trim_end_a,
+        time_b=trim_end_b,
+        label="end"
+    ))
+
+    # Step 4: Fill gaps to ensure sync points every max_interval seconds
+    # Build a lookup from time_a to time_b from results
+    time_lookup: dict[float, float] = {}
+    for r in results:
+        if r.best_time_b is not None and not r.no_match:
+            time_lookup[r.time_a] = r.best_time_b
+
+    # Sort sync points by time_a
+    sync_points.sort(key=lambda p: p.time_a)
+
+    # Use sync points directly without periodic interpolation
+    # Turn apex synchronization provides sufficient sync points
+    filled_points = sync_points
+
+    # Step 5: Calculate speed ratios for each segment
+    for i in range(len(filled_points) - 1):
+        current = filled_points[i]
+        next_point = filled_points[i + 1]
+
+        delta_a = next_point.time_a - current.time_a
+        delta_b = next_point.time_b - current.time_b
+
+        if delta_a > 0:
+            speed = delta_b / delta_a
+        else:
+            speed = 1.0
+
+        # Update in place (need to create new since dataclass might be frozen)
+        filled_points[i] = SyncPoint(
+            time_a=current.time_a,
+            time_b=current.time_b,
+            label=current.label,
+            speed=speed
+        )
+
+    print(f"\nGenerated {len(filled_points)} sync points:", file=sys.stderr)
+    for p in filled_points[:5]:
+        print(f"  {p.label}: A={p.time_a:.2f}s -> B={p.time_b:.2f}s (speed={p.speed:.3f})", file=sys.stderr)
+    if len(filled_points) > 5:
+        print(f"  ... and {len(filled_points) - 5} more", file=sys.stderr)
+
+    return SyncResult(
+        sync_points=filled_points,
+        trim_start_a=trim_start_a,
+        trim_end_a=trim_end_a,
+        trim_start_b=trim_start_b,
+        trim_end_b=trim_end_b,
+        crossings_a=crossings_a,
+        crossings_b=crossings_b
+    )
+
+
+def output_tracksync_csv(
+    sync_result: SyncResult,
+    video_a_path: str,
+    video_b_path: str,
+    output_path: Optional[str] = None
+) -> str:
+    """
+    Output synchronization results in tracksync CSV format.
+
+    The tracksync CSV format:
+    - Header: milestone_name, driver1,, driver2,,
+    - Data: milestone, timestamp1, speed1, timestamp2, speed2
+
+    Args:
+        sync_result: Synchronization result from generate_sync_points
+        video_a_path: Path to video A
+        video_b_path: Path to video B
+        output_path: Optional output file path
+
+    Returns:
+        CSV content as string
+    """
+    import os
+
+    # Extract driver names from filenames
+    driver_a = os.path.splitext(os.path.basename(video_a_path))[0]
+    driver_b = os.path.splitext(os.path.basename(video_b_path))[0]
+
+    lines = []
+
+    # Header row
+    lines.append(f"milestone,{driver_a},{driver_b}")
+
+    # Data rows - use absolute timestamps so tracksync knows exactly where
+    # to start and end in each video file
+    for point in sync_result.sync_points:
+        # Use absolute timestamps (not adjusted) - tracksync will use these
+        # directly to seek into the video files
+        lines.append(f"{point.label},{point.time_a:.3f},{point.time_b:.3f}")
+
+    csv_content = "\n".join(lines) + "\n"
+
+    if output_path:
+        with open(output_path, "w") as f:
+            f.write(csv_content)
+        print(f"\nTracksync CSV saved to: {output_path}", file=sys.stderr)
+
+    return csv_content
+
+
+def generate_pairwise_sync_from_features(
+    features_a: VideoFeatures,
+    features_b: VideoFeatures,
+    max_sync_interval: float = 3.0,
+    window_seconds: float = 20.0
+) -> SyncResult:
+    """
+    Generate synchronization result for a pair of videos using cached features.
+
+    This is the main entry point for pairwise sync when features have already
+    been extracted. It computes cross-correlations and generates sync points.
+
+    Args:
+        features_a: Pre-extracted features for video A (target)
+        features_b: Pre-extracted features for video B (reference)
+        max_sync_interval: Maximum interval between sync points in seconds
+        window_seconds: Correlation window size in seconds
+
+    Returns:
+        SyncResult with sync points and trim information
+    """
+    print(f"\n  Correlating {features_a.driver_name} vs {features_b.driver_name}...", file=sys.stderr)
+
+    # Compute cross-correlations using pre-extracted features
+    results = compute_cross_correlations_from_features(
+        features_a, features_b, window_seconds
+    )
+
+    # Generate sync points
+    sync_result = generate_sync_points(
+        results,
+        features_a.crossings,
+        features_b.crossings,
+        max_interval=max_sync_interval
+    )
+
+    return sync_result
+
+
+def run_sync_all_mode(
+    video_paths: list[str],
+    red_min: int = 200,
+    red_max_gb: int = 80,
+    max_duration: Optional[float] = None,
+    max_sync_interval: float = 3.0,
+    output_dir: str = ".",
+    generate_video: bool = False,
+    video_dir: Optional[str] = None
+) -> dict[tuple[str, str], SyncResult]:
+    """
+    Run synchronization for all video pairs with O(n) feature extraction.
+
+    This mode extracts features from each video exactly once, then generates
+    pairwise sync results for all combinations. For n videos, this is O(n)
+    for extraction plus O(n^2) for pairwise correlation, vs O(n^2) for the
+    naive approach that re-extracts features for each pair.
+
+    Args:
+        video_paths: List of video file paths
+        red_min: Minimum R value for red detection
+        red_max_gb: Maximum G/B values for red detection
+        max_duration: If set, only extract frames up to this duration
+        max_sync_interval: Maximum interval between sync points
+        output_dir: Directory for output files
+        generate_video: If True, generate comparison videos
+        video_dir: Directory containing source videos (for video generation)
+
+    Returns:
+        Dictionary mapping (driver_a, driver_b) to SyncResult
+    """
+    import os
+    from pathlib import Path
+
+    print("=" * 60, file=sys.stderr)
+    print("MULTI-VIDEO SYNCHRONIZATION MODE", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    n_videos = len(video_paths)
+    print(f"\nProcessing {n_videos} videos", file=sys.stderr)
+    print(f"This will generate {n_videos * (n_videos - 1)} pairwise comparisons", file=sys.stderr)
+    print(f"Output directory: {os.path.abspath(output_dir)}", file=sys.stderr)
+
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Phase 1: Extract features from all videos (O(n))
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("PHASE 1: Extracting features from all videos", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    all_features: dict[str, VideoFeatures] = {}
+    for i, video_path in enumerate(video_paths):
+        print(f"\n[{i+1}/{n_videos}] ", end="", file=sys.stderr)
+        features = extract_video_features(
+            video_path, red_min, red_max_gb, max_duration, "  "
+        )
+        all_features[features.driver_name] = features
+
+    # Phase 2: Generate pairwise sync results (O(n^2) but using cached features)
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("PHASE 2: Computing pairwise synchronizations", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    results: dict[tuple[str, str], SyncResult] = {}
+    driver_names = list(all_features.keys())
+    pair_count = 0
+    total_pairs = n_videos * (n_videos - 1)
+
+    for driver_a in driver_names:
+        for driver_b in driver_names:
+            if driver_a == driver_b:
+                continue
+
+            pair_count += 1
+            print(f"\n[{pair_count}/{total_pairs}] {driver_a} vs {driver_b}", file=sys.stderr)
+
+            features_a = all_features[driver_a]
+            features_b = all_features[driver_b]
+
+            sync_result = generate_pairwise_sync_from_features(
+                features_a, features_b, max_sync_interval
+            )
+            results[(driver_a, driver_b)] = sync_result
+
+            # Output CSV for this pair
+            csv_output_path = os.path.join(output_dir, f"{driver_a}_v_{driver_b}_sync.csv")
+            output_tracksync_csv(
+                sync_result,
+                features_a.video_path,
+                features_b.video_path,
+                csv_output_path
+            )
+
+    # Phase 3: Optionally generate videos
+    if generate_video:
+        print("\n" + "=" * 60, file=sys.stderr)
+        print("PHASE 3: Generating comparison videos", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+
+        try:
+            from tracksync.cli import generate_comparison
+            from tracksync.csv_reader import read_csv
+        except ImportError as e:
+            print(f"\nError: Could not import tracksync: {e}", file=sys.stderr)
+            generate_video = False
+
+        if generate_video:
+            video_dir_path = Path(video_dir) if video_dir else Path(video_paths[0]).parent
+            output_dir_path = Path(output_dir)
+
+            print(f"  Video source directory: {video_dir_path}", file=sys.stderr)
+            print(f"  Video output directory: {output_dir_path}", file=sys.stderr)
+
+            for (driver_a, driver_b), sync_result in results.items():
+                print(f"\n  Generating video: {driver_a} vs {driver_b}...", file=sys.stderr)
+
+                try:
+                    # Read the CSV file that was already created in Phase 2
+                    csv_path = os.path.join(output_dir, f"{driver_a}_v_{driver_b}_sync.csv")
+                    videos = read_csv(csv_path)
+
+                    if len(videos) >= 2:
+                        output_path = generate_comparison(
+                            videos[0], videos[1],
+                            video_dir_path, output_dir_path
+                        )
+                        print(f"    Generated: {output_path}", file=sys.stderr)
+                    else:
+                        print(f"    Error: CSV has fewer than 2 videos", file=sys.stderr)
+                except Exception as e:
+                    import traceback
+                    print(f"    Error: {e}", file=sys.stderr)
+                    traceback.print_exc(file=sys.stderr)
+
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("MULTI-VIDEO SYNCHRONIZATION COMPLETE", file=sys.stderr)
+    print(f"Generated {len(results)} pairwise sync results", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    return results
+
+
 def run_debug_mode(
     video_a_path: str,
     video_b_path: str,
@@ -782,6 +1900,24 @@ def run_debug_mode(
 
     print(f"\nComputed {len(results)} cross-correlation results", file=sys.stderr)
 
+    # Compute turn analysis for both videos
+    print("\nComputing turn analysis...", file=sys.stderr)
+    positions_a = interpolate_missing_circles(frames_a)
+    if same_file:
+        positions_b = positions_a
+    else:
+        positions_b = interpolate_missing_circles(frames_b)
+
+    turn_analysis_a = compute_turn_analysis(positions_a, frame_times_a, fps_a, window_seconds=3.0)
+    if same_file:
+        turn_analysis_b = turn_analysis_a
+    else:
+        turn_analysis_b = compute_turn_analysis(positions_b, frame_times_b, fps_b, window_seconds=3.0)
+
+    print(f"  Video A: {len(turn_analysis_a.apexes)} turn apexes detected", file=sys.stderr)
+    if not same_file:
+        print(f"  Video B: {len(turn_analysis_b.apexes)} turn apexes detected", file=sys.stderr)
+
     print("\n" + "=" * 60, file=sys.stderr)
     print("PHASE 3: Interactive visualization", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
@@ -803,7 +1939,7 @@ def run_debug_mode(
         result = results[current_idx]
 
         # Create visualization from pre-computed data
-        display = create_debug_display_v2(result, len(results), current_idx)
+        display = create_debug_display_v2(result, len(results), current_idx, turn_analysis_a, turn_analysis_b)
 
         cv2.imshow("Cross-Correlation Debug", display)
 
@@ -870,7 +2006,9 @@ def apply_mask_overlay(
 def create_debug_display_v2(
     result: CrossCorrelationResult,
     total_results: int,
-    current_idx: int
+    current_idx: int,
+    turn_analysis_a: Optional[TurnAnalysis] = None,
+    turn_analysis_b: Optional[TurnAnalysis] = None
 ) -> np.ndarray:
     """Create debug visualization from pre-computed cross-correlation result."""
     frame_a = result.frame_a
@@ -1066,8 +2204,38 @@ def create_debug_display_v2(
     cv2.putText(info_bar, info_text2, (10, 48),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
 
+    # Create turn angle graphs if turn analysis is provided
+    turn_graphs = None
+    if turn_analysis_a is not None or turn_analysis_b is not None:
+        turn_graph_height = 100
+        turn_graph_width = new_w  # Half width for each
+
+        # Create graph for video A
+        if turn_analysis_a is not None:
+            turn_graph_a = create_turn_angle_graph(
+                turn_analysis_a, result.time_a, turn_graph_width, turn_graph_height, "A"
+            )
+        else:
+            turn_graph_a = np.zeros((turn_graph_height, turn_graph_width, 3), dtype=np.uint8)
+            turn_graph_a[:] = (30, 30, 30)
+
+        # Create graph for video B
+        if turn_analysis_b is not None and result.best_time_b is not None:
+            turn_graph_b = create_turn_angle_graph(
+                turn_analysis_b, result.best_time_b, turn_graph_width, turn_graph_height, "B"
+            )
+        else:
+            turn_graph_b = np.zeros((turn_graph_height, turn_graph_width, 3), dtype=np.uint8)
+            turn_graph_b[:] = (30, 30, 30)
+
+        # Stack turn graphs horizontally
+        turn_graphs = np.hstack([turn_graph_a, turn_graph_b])
+
     # Stack everything vertically
-    display = np.vstack([frames_row, ocr_bar, graph, info_bar])
+    if turn_graphs is not None:
+        display = np.vstack([frames_row, ocr_bar, graph, turn_graphs, info_bar])
+    else:
+        display = np.vstack([frames_row, ocr_bar, graph, info_bar])
 
     return display
 
@@ -1469,9 +2637,147 @@ def run_basic_mode(args: argparse.Namespace) -> None:
     output_csv(alignments, args.video_a, args.video_b, args.output)
 
 
+def run_sync_mode(args: argparse.Namespace) -> SyncResult:
+    """
+    Run synchronization mode to generate timestamps for video scaling.
+
+    This mode:
+    1. Extracts frame data at native FPS using VideoFeatures
+    2. Computes cross-correlations using cached features
+    3. Generates sync points with trim information
+    4. Outputs tracksync-compatible CSV
+    5. Optionally invokes tracksync to generate comparison video
+
+    Returns:
+        SyncResult with synchronization data
+    """
+    import os
+
+    print("=" * 60, file=sys.stderr)
+    print("VIDEO SYNCHRONIZATION MODE", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    # Check if both videos are the same file
+    same_file = os.path.realpath(args.video_a) == os.path.realpath(args.video_b)
+
+    # Determine max duration based on short mode
+    max_duration = 20.0 if args.short else None
+
+    print("\nPHASE 1: Extracting video features", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    # Extract features from both videos
+    print(f"\nVideo A: {args.video_a}", file=sys.stderr)
+    features_a = extract_video_features(
+        args.video_a, args.red_min, args.red_max_gb,
+        max_duration, "  [A] "
+    )
+
+    if same_file:
+        print(f"\nVideo B: same as Video A (reusing extracted features)", file=sys.stderr)
+        features_b = features_a
+    else:
+        print(f"\nVideo B: {args.video_b}", file=sys.stderr)
+        features_b = extract_video_features(
+            args.video_b, args.red_min, args.red_max_gb,
+            max_duration, "  [B] "
+        )
+
+    print(f"\nExtracted {len(features_a.frames)} frames from A ({features_a.fps:.1f} fps), "
+          f"{len(features_b.frames)} frames from B ({features_b.fps:.1f} fps)", file=sys.stderr)
+
+    print("\nPHASE 2: Computing cross-correlations", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    # Compute cross-correlations using pre-extracted features
+    results = compute_cross_correlations_from_features(features_a, features_b)
+
+    print(f"\nComputed {len(results)} cross-correlation results", file=sys.stderr)
+
+    print("\nPHASE 3: Generating synchronization points", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    # Generate sync points
+    sync_result = generate_sync_points(
+        results, features_a.crossings, features_b.crossings,
+        max_interval=args.max_sync_interval
+    )
+
+    # Output tracksync CSV
+    csv_output_path = args.output
+    if not csv_output_path:
+        # Default output path based on video names
+        base_a = os.path.splitext(os.path.basename(args.video_a))[0]
+        base_b = os.path.splitext(os.path.basename(args.video_b))[0]
+        csv_output_path = f"{base_a}_v_{base_b}_sync.csv"
+
+    csv_content = output_tracksync_csv(sync_result, args.video_a, args.video_b, csv_output_path)
+
+    # Optionally generate comparison video
+    if args.generate_video:
+        print("\nPHASE 5: Generating synchronized comparison video", file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
+
+        try:
+            from tracksync.cli import generate_comparison
+            from tracksync.csv_reader import parse_csv_content
+            from pathlib import Path
+
+            # Determine video directory
+            video_dir = Path(args.video_dir) if args.video_dir else Path(args.video_a).parent
+            output_dir = Path(args.output_dir)
+
+            # Parse the CSV we just generated
+            videos = parse_csv_content(csv_content)
+
+            if len(videos) >= 2:
+                target = videos[0]
+                reference = videos[1]
+
+                output_path = generate_comparison(
+                    target, reference,
+                    video_dir, output_dir
+                )
+                print(f"\nGenerated comparison video: {output_path}", file=sys.stderr)
+            else:
+                print("\nError: Need at least 2 drivers in sync data", file=sys.stderr)
+
+        except ImportError as e:
+            print(f"\nError: Could not import tracksync: {e}", file=sys.stderr)
+            print("Install tracksync or run without --generate-video", file=sys.stderr)
+        except Exception as e:
+            print(f"\nError generating video: {e}", file=sys.stderr)
+
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("SYNCHRONIZATION COMPLETE", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    return sync_result
+
+
 def main(argv: Optional[list[str]] = None) -> None:
     """Main entry point."""
     args = parse_args(argv)
+
+    # Handle --sync-all mode (multi-video)
+    if args.sync_all:
+        max_duration = 20.0 if args.short else None
+        run_sync_all_mode(
+            video_paths=args.sync_all,
+            red_min=args.red_min,
+            red_max_gb=args.red_max_gb,
+            max_duration=max_duration,
+            max_sync_interval=args.max_sync_interval,
+            output_dir=args.output_dir,
+            generate_video=args.generate_video,
+            video_dir=args.video_dir
+        )
+        return
+
+    # For other modes, require video_a and video_b
+    if not args.video_a or not args.video_b:
+        print("Error: video_a and video_b are required (unless using --sync-all)", file=sys.stderr)
+        sys.exit(1)
 
     if args.debug:
         run_debug_mode(
@@ -1485,6 +2791,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             interval=args.interval,
             short_mode=args.short
         )
+    elif args.sync:
+        run_sync_mode(args)
     else:
         run_basic_mode(args)
 
