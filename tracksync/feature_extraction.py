@@ -11,7 +11,7 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from .autocorrelation import (
+from .frame_analysis import (
     detect_segment_number,
     extract_frame_ocr,
     find_red_circle,

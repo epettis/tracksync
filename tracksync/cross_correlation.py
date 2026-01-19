@@ -10,7 +10,7 @@ from typing import Optional
 
 import numpy as np
 
-from .autocorrelation import StartFinishCrossing
+from .frame_analysis import StartFinishCrossing
 from .feature_extraction import interpolate_missing_circles
 from .frame_data import CrossCorrelationResult, FrameData, VideoFeatures
 from .models import SyncPoint, SyncResult

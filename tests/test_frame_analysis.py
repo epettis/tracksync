@@ -1,8 +1,8 @@
-"""Tests for the autocorrelation module."""
+"""Tests for the frame_analysis module."""
 
 import numpy as np
 import pytest
-from tracksync.autocorrelation import (
+from tracksync.frame_analysis import (
     binarize_frame,
     FrameOCRData,
     StartFinishCrossing,

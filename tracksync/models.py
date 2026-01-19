@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .autocorrelation import StartFinishCrossing
+    from .frame_analysis import StartFinishCrossing
 
 
 @dataclass(frozen=True)
