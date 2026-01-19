@@ -12,8 +12,8 @@ def read_csv(csv_filename: str) -> List[VideoMetadata]:
     Read a tracksync CSV file and return VideoMetadata objects.
 
     CSV format:
-    - Header row: milestone_name, driver1,, driver2,, ...
-    - Data rows: milestone, timestamp1, speed1, timestamp2, speed2, ...
+    - Header row: milestone, driver1, driver2, ...
+    - Data rows: milestone, timestamp1, timestamp2, ...
 
     Args:
         csv_filename: Path to the CSV file
@@ -41,9 +41,7 @@ def parse_csv_content(content: str) -> List[VideoMetadata]:
 def _parse_csv_reader(reader) -> List[VideoMetadata]:
     """Parse CSV from a csv.reader object.
 
-    Supports two formats:
-    1. Simple format: milestone,driver1,driver2 (no speed columns)
-    2. Legacy format: milestone,driver1,,driver2,, (with speed columns)
+    Format: milestone,driver1,driver2,...
     """
     videos: List[VideoMetadata] = []
     num_drivers = 0

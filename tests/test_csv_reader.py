@@ -21,7 +21,6 @@ class TestParseCSVContent:
         assert len(videos[0].segments) == 4
         assert videos[0].segments[0].title == "Start"
         assert videos[0].segments[0].timestamp == 0.0
-        assert videos[0].segments[0].speed == 100.0
 
     def test_parses_all_segment_values(self, sample_csv_content):
         """Test all segment values are parsed correctly."""
@@ -47,9 +46,9 @@ class TestParseCSVContent:
 
     def test_multiple_drivers(self):
         """Test parsing with multiple drivers."""
-        content = """Ref,A,speed,B,speed,C,speed
-Start,0.0,100,0.1,90,0.2,80
-End,10.0,100,11.0,90,12.0,80
+        content = """Ref,A,B,C
+Start,0.0,0.1,0.2
+End,10.0,11.0,12.0
 """
         videos = parse_csv_content(content)
 
@@ -58,10 +57,10 @@ End,10.0,100,11.0,90,12.0,80
 
     def test_single_driver(self):
         """Test parsing with a single driver."""
-        content = """Ref,Solo,speed
-Start,0.0,100
-Middle,5.0,90
-End,10.0,100
+        content = """Ref,Solo
+Start,0.0
+Middle,5.0
+End,10.0
 """
         videos = parse_csv_content(content)
 
@@ -73,9 +72,9 @@ End,10.0,100
 class TestReadCSV:
     def test_read_actual_file(self, tmp_path):
         """Test reading from an actual file."""
-        csv_content = """Ref,Driver1,speed
-Start,0.0,100
-End,10.0,100
+        csv_content = """Ref,Driver1
+Start,0.0
+End,10.0
 """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text(csv_content)
@@ -88,10 +87,10 @@ End,10.0,100
 
     def test_read_file_with_multiple_drivers(self, tmp_path):
         """Test reading a file with multiple drivers."""
-        csv_content = """Ref,A,speed,B,speed
-Start,0.0,100,0.5,95
-Mid,5.0,80,6.0,75
-End,10.0,100,11.0,95
+        csv_content = """Ref,A,B
+Start,0.0,0.5
+Mid,5.0,6.0
+End,10.0,11.0
 """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text(csv_content)

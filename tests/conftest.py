@@ -74,11 +74,11 @@ def mock_video_loader(synthetic_clip):
 def sample_csv_content():
     """Sample CSV content for testing.
 
-    Format: milestone_name, driver1_timestamp, driver1_speed, driver2_timestamp, driver2_speed, ...
+    Format: milestone, driver1, driver2, ...
     """
-    return """Reference,Driver1,speed1,Driver2,speed2
-Start,0.00,100.00,0.00,95.00
-T1,10.00,80.00,15.00,75.00
-T2,20.00,90.00,25.00,85.00
-Finish,30.00,100.00,40.00,95.00
+    return """Reference,Driver1,Driver2
+Start,0.00,0.00
+T1,10.00,15.00
+T2,20.00,25.00
+Finish,30.00,40.00
 """

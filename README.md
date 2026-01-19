@@ -124,18 +124,6 @@ The first column is the milestone name. Subsequent columns contain the timestamp
 (in seconds) when each driver reaches that milestone. Driver names are taken from
 the header row.
 
-### Legacy format with speed
-
-For compatibility, tracksync also supports a legacy format with speed columns:
-
-```csv
-milestone,driver1,,driver2,,
-start,0.0,100.0,0.1,100.2
-m1,12.3,78.9,11.2,77.8
-```
-
-Empty header columns indicate speed values follow the timestamps.
-
 ## Running Tests
 
 ```bash
