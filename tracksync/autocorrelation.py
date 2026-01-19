@@ -211,6 +211,39 @@ def _parse_lap_time(text: str) -> Optional[float]:
     return None
 
 
+def _is_valid_rollover(
+    lap_before: Optional[int],
+    lap_after: Optional[int],
+    new_lap_time: float,
+    new_lap_time_threshold: float = 10.0
+) -> bool:
+    """
+    Check if a lap time rollover is a valid start-finish crossing.
+
+    A rollover is valid if either:
+    1. The lap number incremented, OR
+    2. The new lap time is small (near start of lap)
+
+    This helps distinguish real crossings from OCR errors.
+
+    Args:
+        lap_before: Lap number before the potential crossing
+        lap_after: Lap number after the potential crossing
+        new_lap_time: The lap time after the potential crossing
+        new_lap_time_threshold: Maximum lap time to consider "near start of lap"
+
+    Returns:
+        True if the rollover appears to be a valid crossing
+    """
+    lap_incremented = (
+        lap_after is not None and
+        lap_before is not None and
+        lap_after > lap_before
+    )
+    new_lap_time_small = new_lap_time < new_lap_time_threshold
+    return lap_incremented or new_lap_time_small
+
+
 def extract_frame_ocr(frame: np.ndarray) -> FrameOCRData:
     """
     Extract all OCR data from a single frame using a single OCR call.
@@ -439,19 +472,10 @@ def _interpolate_lap_times(
         if j == i + 1:
             # Adjacent frames, just check for rollover
             if time_j < time_i - 5.0:  # Rollover threshold: 5 seconds decrease
-                # Validate this is a real crossing, not an OCR error:
-                # 1. The new lap time should be small (near start of lap), OR
-                # 2. The lap number should have incremented
                 lap_before = data[i].lap_number
                 lap_after = data[j].lap_number
-                lap_incremented = (
-                    lap_after is not None and
-                    lap_before is not None and
-                    lap_after > lap_before
-                )
-                new_lap_time_small = time_j < 10.0  # Within 10 seconds of lap start
 
-                if lap_incremented or new_lap_time_small:
+                if _is_valid_rollover(lap_before, lap_after, time_j):
                     # Rollover detected between i and j
                     # Estimate crossing at midpoint
                     crossing_time = (frame_times[i] + frame_times[j]) / 2
@@ -470,19 +494,10 @@ def _interpolate_lap_times(
 
         # Check for rollover
         if time_j < time_i - 5.0:
-            # Validate this is a real crossing, not an OCR error:
-            # 1. The new lap time should be small (near start of lap), OR
-            # 2. The lap number should have incremented
             lap_before = data[i].lap_number
             lap_after = data[j].lap_number
-            lap_incremented = (
-                lap_after is not None and
-                lap_before is not None and
-                lap_after > lap_before
-            )
-            new_lap_time_small = time_j < 10.0  # Within 10 seconds of lap start
 
-            if lap_incremented or new_lap_time_small:
+            if _is_valid_rollover(lap_before, lap_after, time_j):
                 # Rollover occurred somewhere between i and j
                 # Estimate where: lap_time reaches ~0 and restarts
 
@@ -580,17 +595,7 @@ def find_start_finish_crossings(
         if ocr.lap_time_seconds is not None and prev_lap_time is not None:
             # Rollover: time drops by more than 5 seconds
             if prev_lap_time - ocr.lap_time_seconds > 5.0:
-                # Validate this is a real crossing, not an OCR error:
-                # 1. The new lap time should be small (near start of lap), OR
-                # 2. The lap number should have incremented
-                lap_incremented = (
-                    ocr.lap_number is not None and
-                    prev_lap_number is not None and
-                    ocr.lap_number > prev_lap_number
-                )
-                new_lap_time_small = ocr.lap_time_seconds < 10.0  # Within 10 seconds of lap start
-
-                if lap_incremented or new_lap_time_small:
+                if _is_valid_rollover(prev_lap_number, ocr.lap_number, ocr.lap_time_seconds):
                     # Estimate crossing time between prev and current frame
                     # The crossing happens when lap_time would have been 0
                     # If prev_lap_time is X, crossing is X seconds after prev frame

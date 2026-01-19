@@ -52,19 +52,6 @@ class TestFormatCSV:
         assert lines[2] == "Middle,5.000,6.000"
         assert lines[3] == "End,10.000,11.000"
 
-    def test_legacy_format_with_speed(self):
-        """Legacy format includes speed columns."""
-        video = VideoMetadata(driver="Driver1", segments=[
-            Segment(title="Start", timestamp=0.0, speed=1.0),
-            Segment(title="End", timestamp=10.0, speed=0.9),
-        ])
-        result = format_csv([video], include_speed=True)
-        lines = result.strip().split("\n")
-        # Header has empty column for speed
-        assert "Driver1," in lines[0]
-        # Speed=1.0 shows as empty, speed=0.9 shows as "0.9"
-        assert ",0.9" in lines[2]
-
     def test_segment_count_mismatch_raises(self):
         """Mismatched segment counts raise ValueError."""
         video1 = VideoMetadata(driver="A", segments=[

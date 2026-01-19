@@ -25,13 +25,12 @@ def write_csv(videos: List[VideoMetadata], output_path: str) -> None:
         f.write(content)
 
 
-def format_csv(videos: List[VideoMetadata], include_speed: bool = False) -> str:
+def format_csv(videos: List[VideoMetadata]) -> str:
     """
     Format VideoMetadata objects as CSV content.
 
     Args:
         videos: List of VideoMetadata objects to format
-        include_speed: If True, include speed columns (legacy format)
 
     Returns:
         CSV content as a string
@@ -42,17 +41,8 @@ def format_csv(videos: List[VideoMetadata], include_speed: bool = False) -> str:
     output = io.StringIO(newline='')
     writer = csv.writer(output, lineterminator='\n')
 
-    # Build header row
-    if include_speed:
-        # Legacy format: milestone, driver1, , driver2, , ...
-        header = ["milestone"]
-        for video in videos:
-            header.append(video.driver)
-            header.append("")  # Empty column for speed
-    else:
-        # Simple format: milestone, driver1, driver2, ...
-        header = ["milestone"] + [video.driver for video in videos]
-
+    # Build header row: milestone, driver1, driver2, ...
+    header = ["milestone"] + [video.driver for video in videos]
     writer.writerow(header)
 
     # Verify all videos have the same number of segments
@@ -66,24 +56,13 @@ def format_csv(videos: List[VideoMetadata], include_speed: bool = False) -> str:
                     f"{video.driver} has {len(video.segments)}"
                 )
 
-    # Build data rows
+    # Build data rows: milestone, timestamp1, timestamp2, ...
     if videos and videos[0].segments:
         for seg_idx in range(len(videos[0].segments)):
             segment_title = videos[0].segments[seg_idx].title
-
-            if include_speed:
-                # Legacy format: milestone, timestamp1, speed1, timestamp2, speed2, ...
-                row = [segment_title]
-                for video in videos:
-                    seg = video.segments[seg_idx]
-                    row.append(f"{seg.timestamp:.3f}")
-                    row.append(f"{seg.speed:.1f}" if seg.speed != 1.0 else "")
-            else:
-                # Simple format: milestone, timestamp1, timestamp2, ...
-                row = [segment_title]
-                for video in videos:
-                    row.append(f"{video.segments[seg_idx].timestamp:.3f}")
-
+            row = [segment_title]
+            for video in videos:
+                row.append(f"{video.segments[seg_idx].timestamp:.3f}")
             writer.writerow(row)
 
     return output.getvalue()
