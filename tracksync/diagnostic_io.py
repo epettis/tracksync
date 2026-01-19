@@ -14,7 +14,7 @@ from google.protobuf import text_format
 
 from .proto import diagnostic_pb2 as pb
 from .frame_data import CrossCorrelationResult as CCResult
-from .autocorrelation import FrameOCRData, StartFinishCrossing
+from .frame_analysis import FrameOCRData, StartFinishCrossing
 from .models import TurnAnalysis, TurnApex
 
 

@@ -36,7 +36,7 @@ from .cross_correlation import (
     output_tracksync_csv,
 )
 from .turn_analysis import compute_turn_analysis
-from .autocorrelation import interpolate_ocr_data, get_frame_at_time
+from .frame_analysis import interpolate_ocr_data, get_frame_at_time
 from .visualization import create_debug_display_v2, create_debug_display_from_diagnostic
 from .diagnostic_io import (
     export_diagnostic,

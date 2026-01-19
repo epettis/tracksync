@@ -33,7 +33,7 @@ from .cross_correlation import (
     output_tracksync_csv,
 )
 from .turn_analysis import calculate_interior_angle, compute_turn_analysis
-from .autocorrelation import (
+from .frame_analysis import (
     FrameOCRData,
     StartFinishCrossing,
     extract_frame_ocr,

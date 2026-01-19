@@ -9,7 +9,7 @@ from typing import Optional
 
 import numpy as np
 
-from .autocorrelation import FrameOCRData, StartFinishCrossing
+from .frame_analysis import FrameOCRData, StartFinishCrossing
 
 
 @dataclass
