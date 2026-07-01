@@ -229,6 +229,77 @@ def interpolate_missing_circles(frames: list[FrameData]) -> list[Optional[tuple[
     return result
 
 
+def sample_frames(
+    video_path: str,
+    sample_hz: float = 10.0,
+    max_dim: Optional[int] = 518
+) -> tuple[list[np.ndarray], np.ndarray]:
+    """
+    Sample frames from a video at a fixed rate.
+
+    Args:
+        video_path: Path to video file
+        sample_hz: Sampling rate in Hz (frames per second)
+        max_dim: Maximum dimension for resize. Frames are resized so that
+                max(height, width) == max_dim while preserving aspect ratio.
+                If None, no resizing is performed.
+
+    Returns:
+        Tuple of (frames, timestamps):
+        - frames: List of RGB uint8 frames (H, W, 3)
+        - timestamps: Float array of timestamps in seconds
+    """
+    video = cv2.VideoCapture(video_path)
+    if not video.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    try:
+        duration, fps, frame_count = get_video_info(video)
+
+        # Compute sample interval in seconds
+        sample_interval = 1.0 / sample_hz
+
+        # Determine number of samples (drop the last partial interval)
+        num_samples = int(duration * sample_hz)
+
+        frames: list[np.ndarray] = []
+        timestamps: list[float] = []
+
+        for i in range(num_samples):
+            # Timestamp from frame index / fps convention
+            t = i * sample_interval
+
+            # Seek to time
+            video.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = video.read()
+
+            if not ret:
+                # Gracefully handle seek failure near end of video
+                break
+
+            # Convert BGR to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Resize if max_dim is specified
+            if max_dim is not None:
+                h, w = frame.shape[:2]
+                current_max = max(h, w)
+
+                if current_max != max_dim:
+                    scale = max_dim / current_max
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+            frames.append(frame)
+            timestamps.append(t)
+
+        return frames, np.array(timestamps, dtype=np.float64)
+
+    finally:
+        video.release()
+
+
 def extract_video_features(
     video_path: str,
     red_min: int = 200,
