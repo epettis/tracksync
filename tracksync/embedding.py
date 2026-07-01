@@ -237,3 +237,264 @@ def embed_video_cached(
     np.save(cache_file, embeddings)
 
     return embeddings
+
+
+class DinoV2Embedder:
+    """DINOv2 vision transformer embedder for robust visual place recognition.
+
+    Uses pretrained DINOv2 models from Facebook Research via torch.hub. Extracts
+    patch tokens, applies spatial masking to exclude static car-body regions,
+    and aggregates tokens via GeM pooling (generalized mean, p=3).
+
+    Design reference: docs/scene_alignment_design.md §4.3, §11.1
+
+    Attributes:
+        name: Embedder identifier for cache keys
+        model_name: DINOv2 model name (e.g., "dinov2_vitb14")
+        device: Compute device (mps/cuda/cpu), auto-selected if None
+        batch_size: Number of frames to process in one forward pass
+    """
+
+    def __init__(
+        self,
+        model_name: str = "dinov2_vitb14",
+        device: str | None = None,
+        batch_size: int = 16
+    ):
+        """Initialize DinoV2Embedder.
+
+        Args:
+            model_name: DINOv2 model name to load via torch.hub
+            device: Compute device (mps/cuda/cpu), auto-selected if None
+            batch_size: Number of frames to process per batch
+        """
+        # Check scene dependencies before any torch imports
+        from tracksync.scene_deps import require_scene_deps
+        require_scene_deps()
+
+        self.model_name = model_name
+        self.name = model_name.replace("_", "-")  # e.g., "dinov2-vitb14"
+        self.device_str = device
+        self.batch_size = batch_size
+        self._model = None
+        self._device = None
+        self._patch_size = 14  # DINOv2 patch size
+
+    def _ensure_model_loaded(self):
+        """Lazy model loading on first embed() call."""
+        if self._model is not None:
+            return
+
+        # Import torch only when actually needed
+        import torch
+
+        # Auto-select device
+        if self.device_str is None:
+            if torch.backends.mps.is_available():
+                self._device = torch.device("mps")
+            elif torch.cuda.is_available():
+                self._device = torch.device("cuda")
+            else:
+                self._device = torch.device("cpu")
+        else:
+            self._device = torch.device(self.device_str)
+
+        # Load model via torch.hub
+        self._model = torch.hub.load(
+            "facebookresearch/dinov2",
+            self.model_name,
+            pretrained=True
+        )
+        self._model = self._model.to(self._device)
+        self._model.eval()
+
+    def _resize_to_multiple(self, frame: np.ndarray) -> np.ndarray:
+        """Resize frame so H and W are multiples of patch_size (14).
+
+        Args:
+            frame: RGB uint8 frame HxWx3
+
+        Returns:
+            Resized frame with H and W as multiples of 14
+        """
+        import cv2
+        h, w = frame.shape[:2]
+
+        # Round up to next multiple of patch_size
+        h_new = ((h + self._patch_size - 1) // self._patch_size) * self._patch_size
+        w_new = ((w + self._patch_size - 1) // self._patch_size) * self._patch_size
+
+        if h_new != h or w_new != w:
+            frame = cv2.resize(frame, (w_new, h_new), interpolation=cv2.INTER_LINEAR)
+
+        return frame
+
+    def _downsample_mask_to_patches(
+        self,
+        mask: np.ndarray,
+        h_patches: int,
+        w_patches: int
+    ) -> np.ndarray:
+        """Downsample boolean mask to patch grid.
+
+        A patch is marked True (masked) if > 50% of its pixels are True in the
+        original mask.
+
+        Args:
+            mask: HxW boolean mask, True = static/masked
+            h_patches: Number of patch rows
+            w_patches: Number of patch columns
+
+        Returns:
+            h_patches x w_patches boolean mask
+        """
+        import cv2
+        h, w = mask.shape
+
+        # Resize mask to patch grid, counting True pixels in each patch
+        # Use area interpolation which averages the values
+        mask_float = mask.astype(np.float32)
+        mask_downsampled = cv2.resize(
+            mask_float,
+            (w_patches, h_patches),
+            interpolation=cv2.INTER_AREA
+        )
+
+        # A patch is masked if > 50% of its pixels were True
+        return mask_downsampled > 0.5
+
+    def _gem_pool(self, tokens: np.ndarray, p: float = 3.0, eps: float = 1e-6) -> np.ndarray:
+        """Generalized mean pooling over tokens.
+
+        GeM pooling: (mean(clamp(x, min=eps) ** p)) ** (1/p)
+
+        Args:
+            tokens: [N_tokens, D] float array
+            p: GeM power parameter
+            eps: Clamp minimum to avoid zero
+
+        Returns:
+            [D] pooled descriptor
+        """
+        # Clamp to avoid zeros
+        tokens_clamped = np.maximum(tokens, eps)
+        # Raise to power p
+        tokens_pow = tokens_clamped ** p
+        # Mean over tokens
+        mean_pow = tokens_pow.mean(axis=0)
+        # Take p-th root
+        pooled = mean_pow ** (1.0 / p)
+        return pooled
+
+    def embed(
+        self,
+        frames: list[np.ndarray],
+        mask: np.ndarray | None = None
+    ) -> np.ndarray:
+        """Extract DINOv2 embeddings from frames.
+
+        Args:
+            frames: List of RGB uint8 frames, each HxWx3
+            mask: Optional HxW bool array, True = static/exclude pixels
+
+        Returns:
+            float32 array of shape [N, D], rows L2-normalized
+        """
+        if not frames:
+            return np.array([], dtype=np.float32).reshape(0, 0)
+
+        # Ensure model is loaded
+        self._ensure_model_loaded()
+
+        import torch
+
+        # Process frames in batches
+        all_embeddings = []
+
+        for batch_start in range(0, len(frames), self.batch_size):
+            batch_end = min(batch_start + self.batch_size, len(frames))
+            batch_frames = frames[batch_start:batch_end]
+
+            # Resize frames to multiples of patch_size
+            resized_frames = [self._resize_to_multiple(f) for f in batch_frames]
+
+            # Convert to torch tensors [B, 3, H, W], normalized to [0, 1]
+            batch_tensors = []
+            for frame in resized_frames:
+                # Convert to CHW format and normalize
+                tensor = torch.from_numpy(frame).float().permute(2, 0, 1) / 255.0
+                batch_tensors.append(tensor)
+
+            batch_tensor = torch.stack(batch_tensors).to(self._device)
+
+            # Extract patch tokens
+            with torch.no_grad():
+                features = self._model.forward_features(batch_tensor)
+                patch_tokens = features["x_norm_patchtokens"]  # [B, N_patches, D]
+
+            # Convert to numpy
+            patch_tokens_np = patch_tokens.cpu().numpy()  # [B, N_patches, D]
+
+            # Process each frame in the batch
+            for i, frame in enumerate(resized_frames):
+                tokens = patch_tokens_np[i]  # [N_patches, D]
+
+                # Apply mask if provided
+                if mask is not None:
+                    h, w = frame.shape[:2]
+                    h_patches = h // self._patch_size
+                    w_patches = w // self._patch_size
+
+                    # Downsample mask to patch grid
+                    patch_mask = self._downsample_mask_to_patches(mask, h_patches, w_patches)
+
+                    # Flatten patch mask to match tokens
+                    patch_mask_flat = patch_mask.flatten()  # [N_patches]
+
+                    # Keep only tokens where mask is False (not static)
+                    keep_indices = ~patch_mask_flat
+                    tokens = tokens[keep_indices]
+
+                # GeM pooling over remaining tokens
+                if len(tokens) > 0:
+                    pooled = self._gem_pool(tokens, p=3.0)
+                else:
+                    # If all tokens are masked, use zero vector
+                    pooled = np.zeros(tokens.shape[1], dtype=np.float32)
+
+                # L2 normalize
+                norm = np.linalg.norm(pooled)
+                if norm > 0:
+                    pooled = pooled / norm
+
+                all_embeddings.append(pooled)
+
+        return np.array(all_embeddings, dtype=np.float32)
+
+
+def make_embedder(name: str) -> FrameEmbedder:
+    """Factory function for creating embedders by name.
+
+    Args:
+        name: Embedder name, one of:
+            - "gist": GistEmbedder (deterministic baseline)
+            - "dinov2-vits14": DINOv2 ViT-S/14
+            - "dinov2-vitb14": DINOv2 ViT-B/14 (default backbone)
+
+    Returns:
+        FrameEmbedder instance
+
+    Raises:
+        ValueError: If name is not recognized
+    """
+    if name == "gist":
+        return GistEmbedder()
+    elif name == "dinov2-vits14":
+        return DinoV2Embedder(model_name="dinov2_vits14")
+    elif name == "dinov2-vitb14":
+        return DinoV2Embedder(model_name="dinov2_vitb14")
+    else:
+        valid_names = ["gist", "dinov2-vits14", "dinov2-vitb14"]
+        raise ValueError(
+            f"Unknown embedder name: {name}. Valid options: {', '.join(valid_names)}"
+        )
