@@ -35,6 +35,14 @@ from .cross_correlation import (
     generate_pairwise_sync_from_features,
     output_tracksync_csv,
 )
+from .scene_align import (
+    coarse_align,
+    extract_scene_features,
+    generate_scene_sync_points,
+)
+from .embedding import make_embedder
+from .fine_align import make_matcher
+from .scene_deps import MissingSceneDependenciesError, require_scene_deps
 from .turn_analysis import compute_turn_analysis
 from .frame_analysis import interpolate_ocr_data, get_frame_at_time
 from .visualization import create_debug_display_v2, create_debug_display_from_diagnostic
@@ -192,6 +200,40 @@ Examples:
         '--red-max-gb', type=int, default=80,
         help='Maximum G/B value for red detection (default: 80)'
     )
+    sync_parser.add_argument(
+        '--mode', choices=['catalyst', 'scene'], default='catalyst',
+        help='Alignment mode: catalyst (Garmin map dot) or scene '
+             '(camera-agnostic, requires scene extras) (default: catalyst)'
+    )
+    sync_parser.add_argument(
+        '--sample-hz', type=float, default=None,
+        help='[scene mode] Frame sampling rate in Hz (default: 10)'
+    )
+    sync_parser.add_argument(
+        '--band-pct', type=float, default=None,
+        help='[scene mode] DTW band as fraction of sequence length '
+             '(default: 0.10)'
+    )
+    sync_parser.add_argument(
+        '--min-inliers', type=int, default=None,
+        help='[scene mode] Minimum RANSAC inliers to verify a sync point '
+             '(default: 30)'
+    )
+    sync_parser.add_argument(
+        '--fov-deg', type=float, default=None,
+        help='[scene mode] Horizontal camera field of view in degrees '
+             '(default: 90)'
+    )
+    sync_parser.add_argument(
+        '--matcher', default=None,
+        help='[scene mode] Feature matcher: aliked-lightglue or '
+             'superpoint-lightglue (default: aliked-lightglue)'
+    )
+    sync_parser.add_argument(
+        '--embedder', default=None,
+        help='[scene mode] Frame embedder: dinov2-vitb14, dinov2-vits14, '
+             'or gist (default: dinov2-vitb14)'
+    )
 
     # 'generate' subcommand
     gen_parser = subparsers.add_parser(
@@ -284,6 +326,61 @@ Controls:
     )
 
     return parser
+
+
+# Scene-only sync flags: (attribute name, CLI flag, scene-mode default).
+# All use default=None so catalyst mode can detect and reject explicit use.
+_SCENE_ONLY_FLAGS = [
+    ('sample_hz', '--sample-hz', 10.0),
+    ('band_pct', '--band-pct', 0.10),
+    ('min_inliers', '--min-inliers', 30),
+    ('fov_deg', '--fov-deg', 90.0),
+    ('matcher', '--matcher', 'aliked-lightglue'),
+    ('embedder', '--embedder', 'dinov2-vitb14'),
+]
+
+
+def validate_sync_args(args: argparse.Namespace) -> None:
+    """Validate sync arguments across modes.
+
+    In catalyst mode, scene-only flags are rejected with a clear error
+    (exit code 2). In scene mode, unset scene-only flags receive their
+    defaults.
+    """
+    if args.mode == 'catalyst':
+        offending = [
+            flag for attr, flag, _ in _SCENE_ONLY_FLAGS
+            if getattr(args, attr) is not None
+        ]
+        if offending:
+            print(
+                f"Error: {', '.join(offending)} "
+                f"require{'s' if len(offending) == 1 else ''} --mode scene",
+                file=sys.stderr
+            )
+            sys.exit(2)
+    else:
+        for attr, _, default in _SCENE_ONLY_FLAGS:
+            if getattr(args, attr) is None:
+                setattr(args, attr, default)
+
+
+def check_scene_deps(args: argparse.Namespace) -> None:
+    """Exit with code 2 if required scene dependencies are missing.
+
+    Only the DINOv2 embedders and LightGlue matchers need torch; the gist
+    embedder and test-only matchers do not, so they skip the check.
+    """
+    needs_torch = (
+        args.embedder.startswith('dinov2') or 'lightglue' in args.matcher
+    )
+    if not needs_torch:
+        return
+    try:
+        require_scene_deps()
+    except MissingSceneDependenciesError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(2)
 
 
 def run_sync_mode(args: argparse.Namespace) -> SyncResult:
@@ -491,6 +588,245 @@ def run_sync_all_mode(args: argparse.Namespace) -> dict[tuple[str, str], SyncRes
                     print(f"    Generated: {output_path}", file=sys.stderr)
                 else:
                     print(f"    Error: CSV has fewer than 2 videos", file=sys.stderr)
+            except Exception as e:
+                import traceback
+                print(f"    Error: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("MULTI-VIDEO SYNCHRONIZATION COMPLETE", file=sys.stderr)
+    print(f"Generated {len(results)} pairwise sync results", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    return results
+
+
+def run_scene_sync_mode(args: argparse.Namespace) -> SyncResult:
+    """
+    Run scene-mode synchronization for a single video pair.
+
+    This mode:
+    1. Extracts scene features (sampled frames -> static mask -> embeddings)
+    2. Coarse-aligns via banded open-end DTW on the embeddings
+    3. Refines sync points via feature matching and epipolar geometry
+    4. Outputs tracksync-compatible CSV
+    5. Optionally generates comparison video
+    """
+    check_scene_deps(args)
+
+    print("=" * 60, file=sys.stderr)
+    print("VIDEO SYNCHRONIZATION MODE (SCENE)", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    embedder = make_embedder(args.embedder)
+    matcher = make_matcher(args.matcher)
+
+    # Check if both videos are the same file
+    same_file = os.path.realpath(args.video_a) == os.path.realpath(args.video_b)
+
+    print("\nPHASE 1: Extracting scene features", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    print(f"\nVideo A: {args.video_a}", file=sys.stderr)
+    feat_a = extract_scene_features(
+        args.video_a, embedder, sample_hz=args.sample_hz
+    )
+
+    if same_file:
+        print("\nVideo B: same as Video A (reusing extracted features)",
+              file=sys.stderr)
+        feat_b = feat_a
+    else:
+        print(f"\nVideo B: {args.video_b}", file=sys.stderr)
+        feat_b = extract_scene_features(
+            args.video_b, embedder, sample_hz=args.sample_hz
+        )
+
+    print(f"\nExtracted {len(feat_a.frame_times)} samples from A, "
+          f"{len(feat_b.frame_times)} samples from B", file=sys.stderr)
+
+    print("\nPHASE 2: Coarse alignment (DTW)", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    coarse = coarse_align(feat_a, feat_b, band_pct=args.band_pct)
+
+    print(f"\nCoarse alignment: A [{coarse.trim_start_a:.2f}s, "
+          f"{coarse.trim_end_a:.2f}s] -> B [{coarse.trim_start_b:.2f}s, "
+          f"{coarse.trim_end_b:.2f}s]", file=sys.stderr)
+
+    print("\nPHASE 3: Fine refinement and sync point generation",
+          file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    sync_result = generate_scene_sync_points(
+        coarse, args.video_a, args.video_b, matcher,
+        max_sync_interval=args.max_sync_interval,
+        min_inliers=args.min_inliers,
+        fov_deg=args.fov_deg,
+    )
+
+    # Output tracksync CSV
+    csv_output_path = args.output
+    if not csv_output_path:
+        base_a = os.path.splitext(os.path.basename(args.video_a))[0]
+        base_b = os.path.splitext(os.path.basename(args.video_b))[0]
+        csv_output_path = f"{base_a}_v_{base_b}_sync.csv"
+
+    csv_content = output_tracksync_csv(
+        sync_result, args.video_a, args.video_b, csv_output_path
+    )
+
+    # Optionally generate comparison video
+    if args.generate_video:
+        print("\nPHASE 4: Generating synchronized comparison video",
+              file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
+
+        try:
+            video_dir = (Path(args.video_dir) if args.video_dir
+                         else Path(args.video_a).parent)
+            output_dir = Path(args.output_dir)
+
+            videos = parse_csv_content(csv_content)
+
+            if len(videos) >= 2:
+                output_path = generate_comparison(
+                    videos[0], videos[1], video_dir, output_dir
+                )
+                print(f"\nGenerated comparison video: {output_path}",
+                      file=sys.stderr)
+            else:
+                print("\nError: Need at least 2 drivers in sync data",
+                      file=sys.stderr)
+        except Exception as e:
+            print(f"\nError generating video: {e}", file=sys.stderr)
+
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("SYNCHRONIZATION COMPLETE", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    return sync_result
+
+
+def run_scene_sync_all_mode(
+    args: argparse.Namespace,
+) -> dict[tuple[str, str], SyncResult]:
+    """
+    Run scene-mode synchronization for all video pairs.
+
+    Scene features are extracted once per video (and cached on disk), then
+    each ordered pair is coarse-aligned and refined.
+    """
+    check_scene_deps(args)
+
+    video_paths = args.all
+    output_dir = args.output_dir
+
+    print("=" * 60, file=sys.stderr)
+    print("MULTI-VIDEO SYNCHRONIZATION MODE (SCENE)", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    n_videos = len(video_paths)
+    print(f"\nProcessing {n_videos} videos", file=sys.stderr)
+    print(f"This will generate {n_videos * (n_videos - 1)} pairwise "
+          f"comparisons", file=sys.stderr)
+    print(f"Output directory: {os.path.abspath(output_dir)}", file=sys.stderr)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    embedder = make_embedder(args.embedder)
+    matcher = make_matcher(args.matcher)
+
+    # Phase 1: Extract scene features from all videos (O(n), disk-cached)
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("PHASE 1: Extracting scene features from all videos",
+          file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    all_features = {}
+    driver_paths: dict[str, str] = {}
+    for i, video_path in enumerate(video_paths):
+        driver = os.path.splitext(os.path.basename(video_path))[0]
+        print(f"\n[{i+1}/{n_videos}] {video_path}", file=sys.stderr)
+        all_features[driver] = extract_scene_features(
+            video_path, embedder, sample_hz=args.sample_hz
+        )
+        driver_paths[driver] = video_path
+
+    # Phase 2: Pairwise coarse + fine alignment
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("PHASE 2: Computing pairwise synchronizations", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    results: dict[tuple[str, str], SyncResult] = {}
+    driver_names = list(all_features.keys())
+    pair_count = 0
+    total_pairs = n_videos * (n_videos - 1)
+
+    for driver_a in driver_names:
+        for driver_b in driver_names:
+            if driver_a == driver_b:
+                continue
+
+            pair_count += 1
+            print(f"\n[{pair_count}/{total_pairs}] {driver_a} vs {driver_b}",
+                  file=sys.stderr)
+
+            coarse = coarse_align(
+                all_features[driver_a], all_features[driver_b],
+                band_pct=args.band_pct
+            )
+            sync_result = generate_scene_sync_points(
+                coarse, driver_paths[driver_a], driver_paths[driver_b],
+                matcher,
+                max_sync_interval=args.max_sync_interval,
+                min_inliers=args.min_inliers,
+                fov_deg=args.fov_deg,
+            )
+            results[(driver_a, driver_b)] = sync_result
+
+            csv_output_path = os.path.join(
+                output_dir, f"{driver_a}_v_{driver_b}_sync.csv"
+            )
+            output_tracksync_csv(
+                sync_result,
+                driver_paths[driver_a],
+                driver_paths[driver_b],
+                csv_output_path
+            )
+
+    # Phase 3: Optionally generate videos
+    if args.generate_video:
+        print("\n" + "=" * 60, file=sys.stderr)
+        print("PHASE 3: Generating comparison videos", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+
+        video_dir_path = (Path(args.video_dir) if args.video_dir
+                          else Path(video_paths[0]).parent)
+        output_dir_path = Path(output_dir)
+
+        print(f"  Video source directory: {video_dir_path}", file=sys.stderr)
+        print(f"  Video output directory: {output_dir_path}", file=sys.stderr)
+
+        for (driver_a, driver_b), sync_result in results.items():
+            print(f"\n  Generating video: {driver_a} vs {driver_b}...",
+                  file=sys.stderr)
+
+            try:
+                csv_path = os.path.join(
+                    output_dir, f"{driver_a}_v_{driver_b}_sync.csv"
+                )
+                videos = read_csv(csv_path)
+
+                if len(videos) >= 2:
+                    output_path = generate_comparison(
+                        videos[0], videos[1],
+                        video_dir_path, output_dir_path
+                    )
+                    print(f"    Generated: {output_path}", file=sys.stderr)
+                else:
+                    print("    Error: CSV has fewer than 2 videos",
+                          file=sys.stderr)
             except Exception as e:
                 import traceback
                 print(f"    Error: {e}", file=sys.stderr)
@@ -858,13 +1194,20 @@ def main(argv: list = None) -> None:
         sys.exit(1)
 
     if args.command == 'sync':
+        validate_sync_args(args)
         if args.all:
-            run_sync_all_mode(args)
+            if args.mode == 'scene':
+                run_scene_sync_all_mode(args)
+            else:
+                run_sync_all_mode(args)
         else:
             if not args.video_a or not args.video_b:
                 print("Error: sync requires video_a and video_b (or --all)", file=sys.stderr)
                 sys.exit(1)
-            run_sync_mode(args)
+            if args.mode == 'scene':
+                run_scene_sync_mode(args)
+            else:
+                run_sync_mode(args)
     elif args.command == 'generate':
         run_generate_mode(args)
     elif args.command == 'debug':
