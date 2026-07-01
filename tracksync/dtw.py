@@ -96,6 +96,10 @@ def dtw_align(
     # Using int16 to handle large indices (max ~32000)
     backpointer = np.zeros((N_A, N_B), dtype=np.int16)
 
+    # Path length (in cells) accompanying dp, used to normalize open-end
+    # selection so shorter paths are not spuriously preferred.
+    steps = np.zeros((N_A, N_B), dtype=np.int32)
+
     # Initialize open start positions
     start_slack = open_end_frames[0]
     for i in range(min(start_slack + 1, N_A)):
@@ -103,6 +107,7 @@ def dtw_align(
             # Check if (i, j) is within the band
             if abs(i / max(N_A - 1, 1) - j / max(N_B - 1, 1)) <= band_pct:
                 dp[i, j] = cost[i, j]
+                steps[i, j] = 1
 
     # Pre-compute valid bands for each row
     bands = []
@@ -164,19 +169,30 @@ def dtw_align(
 
         # Update DP table and backpointers
         valid = best_costs < np.inf
-        dp[i, j_range[valid]] = best_costs[valid] + cost[i, j_range[valid]]
-        backpointer[i, j_range[valid]] = best_steps[valid]
+        j_valid = j_range[valid]
+        dp[i, j_valid] = best_costs[valid] + cost[i, j_valid]
+        backpointer[i, j_valid] = best_steps[valid]
+        di_arr = (best_steps[valid] // 1000).astype(np.int32)
+        dj_arr = (best_steps[valid] % 1000).astype(np.int32)
+        steps[i, j_valid] = steps[i - di_arr, j_valid - dj_arr] + 1
 
-    # Find the best end position within open-end slack
+    # Find the best end position within open-end slack. Compare average
+    # per-cell cost (dp / steps) rather than raw accumulated cost: raw
+    # comparison would always favor the shortest path in the slack region,
+    # degenerating to a single cell when the slack is large.
     end_slack = open_end_frames[1]
+    best_end_avg = np.inf
     best_end_cost = np.inf
     best_end_i, best_end_j = N_A - 1, N_B - 1
 
     for i in range(max(0, N_A - end_slack - 1), N_A):
         for j in range(max(0, N_B - end_slack - 1), N_B):
-            if dp[i, j] < best_end_cost:
-                best_end_cost = dp[i, j]
-                best_end_i, best_end_j = i, j
+            if dp[i, j] < np.inf and steps[i, j] > 0:
+                avg = dp[i, j] / steps[i, j]
+                if avg < best_end_avg:
+                    best_end_avg = avg
+                    best_end_cost = dp[i, j]
+                    best_end_i, best_end_j = i, j
 
     # Backtrack to recover the path
     path = []
@@ -276,11 +292,18 @@ def smooth_path(
     t_a_unique = t_a_path[unique_mask]
     t_b_unique = t_b_path[unique_mask]
 
-    # Ensure we have at least 2 points for interpolation
+    # Ensure we have at least 2 distinct points for interpolation
     if len(t_a_unique) < 2:
-        # Fallback: use path endpoints
-        t_a_unique = np.array([t_a_path[0], t_a_path[-1]])
-        t_b_unique = np.array([t_b_path[0], t_b_path[-1]])
+        if t_a_path[-1] > t_a_path[0]:
+            # Fallback: use path endpoints
+            t_a_unique = np.array([t_a_path[0], t_a_path[-1]])
+            t_b_unique = np.array([t_b_path[0], t_b_path[-1]])
+        else:
+            raise ValueError(
+                "DTW path is degenerate (fewer than 2 distinct A-times); "
+                "cannot build a smooth time mapping. This usually indicates "
+                "an alignment failure (e.g., excessive open-end slack)."
+            )
 
     # Ensure strict monotonicity in y values by adding tiny increments where needed
     # This handles cases where the path has horizontal segments

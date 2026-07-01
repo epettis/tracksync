@@ -74,3 +74,20 @@ class CrossCorrelationResult:
     # OCR data for both frames
     ocr_a: Optional[FrameOCRData] = None
     ocr_b: Optional[FrameOCRData] = None
+
+
+@dataclass
+class SceneFeatures:
+    """Features extracted from a video for scene-based alignment.
+
+    This dataclass stores the per-frame embeddings and metadata needed for
+    coarse scene alignment via DTW. It is parallel to (not merged with) the
+    Catalyst-mode VideoFeatures dataclass.
+
+    Design reference: docs/scene_alignment_design.md §4, task T7
+    """
+    video_path: str
+    frame_times: np.ndarray  # Timestamps in seconds [N]
+    emb_array: np.ndarray  # L2-normalized embeddings [N, D]
+    static_mask: np.ndarray  # Static region mask (HxW bool, True = static)
+    sample_hz: float  # Sampling rate in Hz
