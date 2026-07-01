@@ -19,6 +19,12 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
 ]
+scene = [
+    "torch>=2.1",
+    "timm>=0.9",
+    "lightglue @ git+https://github.com/cvg/LightGlue.git",
+    "scipy>=1.10",
+]
 
 [project.scripts]
 tracksync = "tracksync.cli:main"
@@ -32,7 +38,10 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -m \"not slow\""
+markers = [
+    "slow: marks tests as slow (deselected by default)",
+]
 
 [tool.coverage.run]
 source = ["tracksync"]
