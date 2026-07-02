@@ -23,13 +23,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+import cv2
 import numpy as np
 
 from .dtw import DtwResult, SmoothPath, dtw_align, smooth_path
 from .embedding import FrameEmbedder, build_cache_key, embed_video_cached
 from .feature_extraction import sample_frames
+from .fine_align import (
+    FeatureMatcher,
+    clamp_monotonic,
+    intrinsics_from_fov,
+    refine_sync_point,
+)
 from .frame_data import SceneFeatures
 from .masking import compute_static_mask
+from .models import SyncPoint, SyncResult
+
+# Decoder callable: (video_path, center_s, half_window_s) -> (frames, times).
+# Frames are RGB uint8 at native fps; times are float seconds. Injected into
+# generate_scene_sync_points so tests can bypass real video decoding.
+FrameWindowDecoder = Callable[[str, float, float], tuple[list[np.ndarray], np.ndarray]]
 
 
 def extract_scene_features(
@@ -110,6 +123,44 @@ class CoarseAlignment:
         return float(np.interp(t_a, self._frame_times_a, self.margins))
 
 
+def compute_scene_cost_matrix(
+    feat_a: SceneFeatures,
+    feat_b: SceneFeatures,
+) -> np.ndarray:
+    """Compute the cosine cost matrix between two videos' embeddings.
+
+    Embeddings are L2-normalized, so cosine similarity is a dot product and
+    cost = 1 - similarity, clipped to a valid finite range.
+
+    Args:
+        feat_a: Scene features for video A
+        feat_b: Scene features for video B
+
+    Returns:
+        Cost matrix [N_A, N_B] with values in [0, 2]
+
+    Design reference: docs/scene_alignment_design.md §4.4
+    """
+    # Use float64 for numerical stability and suppress overflow warnings
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=RuntimeWarning)
+        emb_a_64 = feat_a.emb_array.astype(np.float64)
+        emb_b_64 = feat_b.emb_array.astype(np.float64)
+        similarity = emb_a_64 @ emb_b_64.T  # [N_A, N_B]
+
+    # Clip to valid range for cosine similarity [-1, 1]
+    similarity = np.clip(similarity, -1.0, 1.0)
+    cost = 1.0 - similarity
+
+    # Ensure cost matrix is valid (no NaN/Inf)
+    if not np.all(np.isfinite(cost)):
+        # Replace invalid values with a high cost
+        cost = np.nan_to_num(cost, nan=2.0, posinf=2.0, neginf=0.0)
+
+    return cost
+
+
 def coarse_align(
     feat_a: SceneFeatures,
     feat_b: SceneFeatures,
@@ -134,23 +185,7 @@ def coarse_align(
     Design reference: docs/scene_alignment_design.md §4.4, task T7
     """
     # Step 1: Compute cosine cost matrix (1 - similarity)
-    # Embeddings are L2-normalized, so cosine similarity = dot product
-    # Use float64 for numerical stability and suppress overflow warnings
-    import warnings
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=RuntimeWarning)
-        emb_a_64 = feat_a.emb_array.astype(np.float64)
-        emb_b_64 = feat_b.emb_array.astype(np.float64)
-        similarity = emb_a_64 @ emb_b_64.T  # [N_A, N_B]
-
-    # Clip to valid range for cosine similarity [-1, 1]
-    similarity = np.clip(similarity, -1.0, 1.0)
-    cost = 1.0 - similarity
-
-    # Ensure cost matrix is valid (no NaN/Inf)
-    if not np.all(np.isfinite(cost)):
-        # Replace invalid values with a high cost
-        cost = np.nan_to_num(cost, nan=2.0, posinf=2.0, neginf=0.0)
+    cost = compute_scene_cost_matrix(feat_a, feat_b)
 
     # Step 2: Convert open_end_s to frames. Clamp the slack to a quarter of
     # the shorter sequence so it can never swallow the whole alignment
@@ -194,4 +229,220 @@ def coarse_align(
         trim_start_b=trim_start_b,
         trim_end_b=trim_end_b,
         _frame_times_a=feat_a.frame_times,
+    )
+
+
+def decode_native_window(
+    video_path: str,
+    center_s: float,
+    half_window_s: float = 0.5,
+) -> tuple[list[np.ndarray], np.ndarray]:
+    """Decode a window of frames around a center time at native fps.
+
+    Args:
+        video_path: Path to video file
+        center_s: Center time of the window in seconds
+        half_window_s: Half-width of the window in seconds (0.0 = single frame)
+
+    Returns:
+        Tuple of (frames, timestamps):
+        - frames: List of RGB uint8 frames at native fps
+        - timestamps: Float array of timestamps (frame index / fps convention)
+    """
+    video = cv2.VideoCapture(video_path)
+    if not video.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    try:
+        fps = video.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = 30.0
+        frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        start_idx = max(0, int(round((center_s - half_window_s) * fps)))
+        end_idx = int(round((center_s + half_window_s) * fps))
+        if frame_count > 0:
+            end_idx = min(end_idx, frame_count - 1)
+
+        video.set(cv2.CAP_PROP_POS_FRAMES, start_idx)
+
+        frames: list[np.ndarray] = []
+        timestamps: list[float] = []
+        for idx in range(start_idx, end_idx + 1):
+            ret, frame = video.read()
+            if not ret:
+                break
+            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            timestamps.append(idx / fps)
+
+        return frames, np.array(timestamps, dtype=np.float64)
+
+    finally:
+        video.release()
+
+
+def _candidate_sync_times(
+    coarse: CoarseAlignment,
+    max_sync_interval: float,
+) -> list[float]:
+    """Generate candidate sync times in A, snapped to local margin maxima.
+
+    Candidates are spaced so no gap exceeds max_sync_interval, even after
+    snapping: interior candidates may shift by at most half the slack between
+    the nominal spacing and max_sync_interval (design §5.1, §4.5).
+
+    Args:
+        coarse: Coarse alignment providing trim range and per-frame margins
+        max_sync_interval: Maximum allowed gap between candidates in seconds
+
+    Returns:
+        Strictly increasing candidate times, starting at trim_start_a and
+        ending at trim_end_a
+    """
+    t_start = coarse.trim_start_a
+    t_end = coarse.trim_end_a
+    duration = t_end - t_start
+    if duration <= 0:
+        return [t_start]
+
+    n_intervals = max(1, int(np.ceil(duration / max_sync_interval)))
+    spacing = duration / n_intervals
+
+    # Snap radius: bounded so that worst-case gap (spacing + 2r) stays within
+    # max_sync_interval, and never more than a quarter of the spacing.
+    snap_radius = min(0.5 * (max_sync_interval - spacing), 0.25 * spacing)
+    snap_radius = max(0.0, snap_radius)
+
+    frame_times = coarse._frame_times_a
+    margins = coarse.margins
+
+    times = [t_start]
+    for k in range(1, n_intervals):
+        nominal = t_start + k * spacing
+        snapped = nominal
+        if snap_radius > 0 and frame_times is not None:
+            in_window = (frame_times >= nominal - snap_radius) & \
+                        (frame_times <= nominal + snap_radius)
+            idxs = np.where(in_window)[0]
+            if len(idxs) > 0:
+                best = idxs[np.argmax(margins[idxs])]
+                snapped = float(frame_times[best])
+        # Keep candidates strictly increasing and strictly interior
+        if not (times[-1] < snapped < t_end):
+            snapped = nominal
+        if times[-1] < snapped < t_end:
+            times.append(snapped)
+    times.append(t_end)
+
+    return times
+
+
+def generate_scene_sync_points(
+    coarse: CoarseAlignment,
+    video_a: str,
+    video_b: str,
+    matcher: FeatureMatcher,
+    max_sync_interval: float = 3.0,
+    min_inliers: int = 30,
+    fov_deg: float = 90.0,
+    decode_window: Optional[FrameWindowDecoder] = None,
+) -> SyncResult:
+    """Assemble scene-mode sync points into a SyncResult.
+
+    For each candidate time in A (cadence <= max_sync_interval, snapped to
+    high-confidence frames), decodes a +/-0.5 s native-fps window from video B
+    around the coarse estimate f(t_A) and refines the correspondence via
+    zero-crossing analysis (T8). Unverified candidates fall back to the
+    smoothed coarse estimate. Timestamps are clamped monotonic and labeled
+    start, sync_1..sync_N, end with per-segment speed ratios computed exactly
+    as the legacy Catalyst assembly does.
+
+    Args:
+        coarse: Coarse alignment from coarse_align()
+        video_a: Path to video A
+        video_b: Path to video B
+        matcher: FeatureMatcher for fine refinement
+        max_sync_interval: Maximum gap between sync points in A (seconds)
+        min_inliers: Minimum inlier count for fine verification
+        fov_deg: Assumed horizontal FOV for intrinsics
+        decode_window: Injected frame-window decoder (defaults to
+            decode_native_window); tests can bypass video decoding
+
+    Returns:
+        SyncResult with labeled sync points, speed ratios, and trim fields
+        populated from the coarse alignment
+
+    Design reference: docs/scene_alignment_design.md §5.1-5.4, §11.2, task T10
+    """
+    if decode_window is None:
+        decode_window = decode_native_window
+
+    candidate_times = _candidate_sync_times(coarse, max_sync_interval)
+
+    pairs: list[tuple[float, float]] = []
+    for t_a in candidate_times:
+        t_b_coarse = coarse.f(t_a)
+        t_b = float(t_b_coarse)
+
+        frames_a, _ = decode_window(video_a, t_a, 0.0)
+        frames_b, times_b = decode_window(video_b, t_b_coarse, 0.5)
+
+        if frames_a and len(frames_b) > 0:
+            frame_a = frames_a[0]
+            h_a, w_a = frame_a.shape[:2]
+            h_b, w_b = frames_b[0].shape[:2]
+            K_a = intrinsics_from_fov(w_a, h_a, fov_deg)
+            K_b = intrinsics_from_fov(w_b, h_b, fov_deg)
+
+            result = refine_sync_point(
+                frame_a, frames_b, times_b, matcher, K_a, K_b,
+                min_inliers=min_inliers,
+            )
+            if result.verified and result.t_b is not None:
+                t_b = float(result.t_b)
+
+        pairs.append((float(t_a), t_b))
+
+    pairs = clamp_monotonic(pairs)
+
+    # Label sync points: start, sync_1..sync_N, end (design §11.2)
+    sync_points: list[SyncPoint] = []
+    for i, (t_a, t_b) in enumerate(pairs):
+        if i == 0:
+            label = "start"
+        elif i == len(pairs) - 1:
+            label = "end"
+        else:
+            label = f"sync_{i}"
+        sync_points.append(SyncPoint(time_a=t_a, time_b=t_b, label=label))
+
+    # Per-segment speed ratios, exactly as the legacy assembly
+    # (cross_correlation.py generate_sync_points)
+    for i in range(len(sync_points) - 1):
+        current = sync_points[i]
+        next_point = sync_points[i + 1]
+
+        delta_a = next_point.time_a - current.time_a
+        delta_b = next_point.time_b - current.time_b
+
+        if delta_a > 0:
+            speed = delta_b / delta_a
+        else:
+            speed = 1.0
+
+        sync_points[i] = SyncPoint(
+            time_a=current.time_a,
+            time_b=current.time_b,
+            label=current.label,
+            speed=speed,
+        )
+
+    return SyncResult(
+        sync_points=sync_points,
+        trim_start_a=coarse.trim_start_a,
+        trim_end_a=coarse.trim_end_a,
+        trim_start_b=coarse.trim_start_b,
+        trim_end_b=coarse.trim_end_b,
+        crossings_a=[],
+        crossings_b=[],
     )

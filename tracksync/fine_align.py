@@ -436,3 +436,242 @@ def clamp_monotonic(sync_times: list[tuple[float, float]]) -> list[tuple[float, 
         clamped.append((t_a, t_b))
 
     return clamped
+
+
+class LightGlueMatcher:
+    """LightGlue-based feature matcher for local correspondence estimation.
+
+    Uses ALIKED or SuperPoint feature extractors combined with the LightGlue
+    matcher (Apache-2.0 license). Automatically excludes keypoints in static
+    regions (car body, dashboard, overlays) based on provided masks.
+
+    Design reference: docs/scene_alignment_design.md §5.2, §9.4
+
+    Attributes:
+        name: Matcher identifier (e.g., "aliked-lightglue", "superpoint-lightglue")
+        features: Feature extractor type ("aliked" or "superpoint")
+        device_str: Target compute device (mps/cuda/cpu), auto-selected if None
+    """
+
+    def __init__(self, features: str = "aliked", device: str | None = None):
+        """Initialize LightGlueMatcher.
+
+        Args:
+            features: Feature extractor to use ("aliked" or "superpoint")
+            device: Compute device (mps/cuda/cpu), auto-selected if None
+
+        Raises:
+            ValueError: If features is not "aliked" or "superpoint"
+            MissingSceneDependenciesError: If torch/lightglue not installed
+        """
+        # Check scene dependencies before any torch imports
+        from tracksync.scene_deps import require_scene_deps
+        require_scene_deps()
+
+        if features not in ("aliked", "superpoint"):
+            raise ValueError(
+                f"Unknown features type: {features}. Must be 'aliked' or 'superpoint'."
+            )
+
+        self.features = features
+        self.name = f"{features}-lightglue"
+        self.device_str = device
+        self._extractor = None
+        self._matcher = None
+        self._device = None
+
+        # Warn about SuperPoint license
+        if features == "superpoint":
+            import warnings
+            warnings.warn(
+                "SuperPoint weights are subject to a research-only license. "
+                "For commercial or production use, prefer ALIKED (aliked-lightglue).",
+                category=UserWarning,
+                stacklevel=2
+            )
+
+    def _ensure_models_loaded(self):
+        """Lazy model loading on first match() call."""
+        if self._extractor is not None:
+            return
+
+        # Import torch and lightglue only when actually needed
+        import torch
+
+        # Auto-select device
+        if self.device_str is None:
+            if torch.backends.mps.is_available():
+                self._device = torch.device("mps")
+            elif torch.cuda.is_available():
+                self._device = torch.device("cuda")
+            else:
+                self._device = torch.device("cpu")
+        else:
+            self._device = torch.device(self.device_str)
+
+        # Import lightglue components
+        if self.features == "aliked":
+            from lightglue import ALIKED, LightGlue
+            self._extractor = ALIKED(max_num_keypoints=2048).eval().to(self._device)
+            self._matcher = LightGlue(features="aliked").eval().to(self._device)
+        else:  # superpoint
+            from lightglue import SuperPoint, LightGlue
+            self._extractor = SuperPoint(max_num_keypoints=2048).eval().to(self._device)
+            self._matcher = LightGlue(features="superpoint").eval().to(self._device)
+
+    def _filter_keypoints_by_mask(
+        self,
+        keypoints: np.ndarray,
+        mask: np.ndarray | None
+    ) -> np.ndarray:
+        """Filter out keypoints that fall inside masked regions.
+
+        Args:
+            keypoints: [N, 2] array of (x, y) pixel coordinates
+            mask: HxW bool array, True = static/exclude, or None
+
+        Returns:
+            Boolean mask [N] where True = keep this keypoint
+        """
+        if mask is None:
+            return np.ones(len(keypoints), dtype=bool)
+
+        # Check each keypoint against the mask
+        h, w = mask.shape
+        keep_mask = np.ones(len(keypoints), dtype=bool)
+
+        for i, (x, y) in enumerate(keypoints):
+            # Convert to integer pixel coordinates
+            px = int(round(x))
+            py = int(round(y))
+
+            # Clamp to image bounds
+            px = max(0, min(w - 1, px))
+            py = max(0, min(h - 1, py))
+
+            # Check if this pixel is masked (True = static/exclude)
+            if mask[py, px]:
+                keep_mask[i] = False
+
+        return keep_mask
+
+    def match(
+        self,
+        img_a: np.ndarray,
+        img_b: np.ndarray,
+        mask_a: np.ndarray | None = None,
+        mask_b: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Match features between two images.
+
+        Args:
+            img_a: First image (RGB uint8 HxWx3)
+            img_b: Second image (RGB uint8 HxWx3)
+            mask_a: Optional static mask for image A (HxW bool, True = exclude)
+            mask_b: Optional static mask for image B (HxW bool, True = exclude)
+
+        Returns:
+            pts_a: Matched keypoints in image A, shape [M, 2] (x, y)
+            pts_b: Corresponding keypoints in image B, shape [M, 2] (x, y)
+        """
+        # Ensure models are loaded
+        self._ensure_models_loaded()
+
+        import torch
+
+        # Convert images to tensor format
+        # LightGlue expects grayscale images in [0, 1], CHW format, with batch dim
+        def to_tensor(img: np.ndarray) -> torch.Tensor:
+            # Convert RGB to grayscale
+            if img.ndim == 3:
+                gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img
+
+            # Convert to float [0, 1], add channel dim, add batch dim
+            tensor = torch.from_numpy(gray).float() / 255.0
+            tensor = tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
+            return tensor.to(self._device)
+
+        img_a_tensor = to_tensor(img_a)
+        img_b_tensor = to_tensor(img_b)
+
+        # Extract features
+        with torch.inference_mode():
+            feats_a = self._extractor.extract(img_a_tensor)
+            feats_b = self._extractor.extract(img_b_tensor)
+
+            # Convert keypoints to numpy for mask filtering
+            kpts_a_np = feats_a["keypoints"][0].cpu().numpy()  # [N_a, 2]
+            kpts_b_np = feats_b["keypoints"][0].cpu().numpy()  # [N_b, 2]
+
+            # Filter keypoints by masks
+            keep_a = self._filter_keypoints_by_mask(kpts_a_np, mask_a)
+            keep_b = self._filter_keypoints_by_mask(kpts_b_np, mask_b)
+
+            # Apply filters to feature dictionaries
+            # LightGlue expects keypoints, descriptors, and optional scores
+            if not keep_a.all():
+                keep_indices_a = torch.from_numpy(np.where(keep_a)[0]).to(self._device)
+                feats_a["keypoints"] = feats_a["keypoints"][:, keep_indices_a, :]
+                feats_a["descriptors"] = feats_a["descriptors"][:, keep_indices_a, :]
+                if "keypoint_scores" in feats_a:
+                    feats_a["keypoint_scores"] = feats_a["keypoint_scores"][:, keep_indices_a]
+
+            if not keep_b.all():
+                keep_indices_b = torch.from_numpy(np.where(keep_b)[0]).to(self._device)
+                feats_b["keypoints"] = feats_b["keypoints"][:, keep_indices_b, :]
+                feats_b["descriptors"] = feats_b["descriptors"][:, keep_indices_b, :]
+                if "keypoint_scores" in feats_b:
+                    feats_b["keypoint_scores"] = feats_b["keypoint_scores"][:, keep_indices_b]
+
+            # Match features
+            matches = self._matcher({"image0": feats_a, "image1": feats_b})
+
+            # Extract matched keypoint indices
+            matches_idx = matches["matches"][0]  # [N_matches, 2]
+            matches_idx = matches_idx.cpu().numpy()
+
+            # Get matched keypoints
+            kpts_a_matched = feats_a["keypoints"][0].cpu().numpy()  # Already filtered
+            kpts_b_matched = feats_b["keypoints"][0].cpu().numpy()  # Already filtered
+
+            # Build correspondence arrays
+            if len(matches_idx) == 0:
+                return np.array([], dtype=np.float32).reshape(0, 2), np.array([], dtype=np.float32).reshape(0, 2)
+
+            pts_a = kpts_a_matched[matches_idx[:, 0]]
+            pts_b = kpts_b_matched[matches_idx[:, 1]]
+
+        return pts_a.astype(np.float32), pts_b.astype(np.float32)
+
+
+def make_matcher(name: str) -> FeatureMatcher:
+    """Factory function for creating feature matchers by name.
+
+    Args:
+        name: Matcher name, one of:
+            - "aliked-lightglue": ALIKED + LightGlue (default, permissive license)
+            - "superpoint-lightglue": SuperPoint + LightGlue (research license)
+            - "synthetic": Reserved for tests
+
+    Returns:
+        FeatureMatcher instance
+
+    Raises:
+        ValueError: If name is not recognized or is "synthetic"
+    """
+    if name == "aliked-lightglue":
+        return LightGlueMatcher(features="aliked")
+    elif name == "superpoint-lightglue":
+        return LightGlueMatcher(features="superpoint")
+    elif name == "synthetic":
+        raise ValueError(
+            "Matcher name 'synthetic' is reserved for tests. "
+            "Tests should construct their own synthetic matcher implementations."
+        )
+    else:
+        valid_names = ["aliked-lightglue", "superpoint-lightglue"]
+        raise ValueError(
+            f"Unknown matcher name: {name}. Valid options: {', '.join(valid_names)}"
+        )

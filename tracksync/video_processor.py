@@ -1,5 +1,6 @@
 """Video processing operations using MoviePy."""
 
+import sys
 from typing import Callable, List, Optional
 
 import numpy as np
@@ -117,13 +118,26 @@ class VideoProcessor:
         Args:
             clip: Video clip to export
             output_path: Output file path
-            audio_from: Optional clip to use audio from (typically reference)
+            audio_from: Optional clip to use audio from (typically the trimmed
+                reference segment). Its audio is used verbatim, so it must
+                already be trimmed to the output span.
             fps: Frames per second
             codec: Video codec
             audio_codec: Audio codec
         """
+        # Always set the audio explicitly. A stacked (clips_array) clip carries
+        # a composite of its children's audio, which includes the speed-warped
+        # target track — writing that would pitch-bend the audio. So we either
+        # use the reference audio, or mute; we never fall through to composite.
         if audio_from is not None and audio_from.audio is not None:
             clip = clip.with_audio(audio_from.audio)
+        else:
+            if audio_from is not None:
+                print(
+                    "Warning: reference has no audio track; output will be silent.",
+                    file=sys.stderr,
+                )
+            clip = clip.without_audio()
 
         clip.write_videofile(
             output_path,
