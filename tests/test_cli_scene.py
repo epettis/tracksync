@@ -26,10 +26,10 @@ from tests.test_scene_align_coarse import create_synthetic_moving_noise_video
 class TestSceneFlagParsing:
     """Argparse-level tests for the new sync flags."""
 
-    def test_mode_defaults_to_catalyst(self):
+    def test_mode_defaults_to_scene(self):
         parser = create_parser()
         args = parser.parse_args(['sync', 'a.mp4', 'b.mp4'])
-        assert args.mode == 'catalyst'
+        assert args.mode == 'scene'
 
     def test_mode_scene_parses(self):
         parser = create_parser()
@@ -96,7 +96,7 @@ class TestValidateSyncArgs:
     ])
     def test_catalyst_rejects_scene_only_flags(self, flag_args, capsys):
         """Every scene-only flag must be rejected in catalyst mode (exit 2)."""
-        args = self._parse(flag_args)
+        args = self._parse(['--mode', 'catalyst'] + flag_args)
         with pytest.raises(SystemExit) as exc_info:
             validate_sync_args(args)
         assert exc_info.value.code == 2
@@ -105,7 +105,7 @@ class TestValidateSyncArgs:
         assert '--mode scene' in err
 
     def test_catalyst_rejects_multiple_flags_listing_all(self, capsys):
-        args = self._parse(['--sample-hz', '10', '--fov-deg', '90'])
+        args = self._parse(['--mode', 'catalyst', '--sample-hz', '10', '--fov-deg', '90'])
         with pytest.raises(SystemExit) as exc_info:
             validate_sync_args(args)
         assert exc_info.value.code == 2
@@ -114,7 +114,7 @@ class TestValidateSyncArgs:
         assert '--fov-deg' in err
 
     def test_catalyst_without_scene_flags_is_noop(self):
-        args = self._parse([])
+        args = self._parse(['--mode', 'catalyst'])
         validate_sync_args(args)  # Must not raise
         assert args.mode == 'catalyst'
         assert args.sample_hz is None
@@ -200,10 +200,26 @@ class TestMainDispatch:
             lambda args: pytest.fail("scene path taken in catalyst mode"),
         )
 
-        main(['sync', 'a.mp4', 'b.mp4'])
+        main(['sync', 'a.mp4', 'b.mp4', '--mode', 'catalyst'])
 
         assert len(calls) == 1
         assert calls[0].mode == 'catalyst'
+
+    def test_default_pair_dispatches_run_scene_sync_mode(self, monkeypatch):
+        """With no --mode, sync now defaults to the scene path (T14)."""
+        calls = []
+        monkeypatch.setattr(
+            cli, 'run_sync_mode',
+            lambda args: pytest.fail("catalyst path taken by default"),
+        )
+        monkeypatch.setattr(
+            cli, 'run_scene_sync_mode', lambda args: calls.append(args)
+        )
+
+        main(['sync', 'a.mp4', 'b.mp4'])
+
+        assert len(calls) == 1
+        assert calls[0].mode == 'scene'
 
     def test_scene_pair_dispatches_run_scene_sync_mode(self, monkeypatch):
         calls = []
@@ -245,7 +261,7 @@ class TestMainDispatch:
         )
 
         with pytest.raises(SystemExit) as exc_info:
-            main(['sync', '--all', 'a.mp4', 'b.mp4', '--embedder', 'gist'])
+            main(['sync', '--all', 'a.mp4', 'b.mp4', '--mode', 'catalyst', '--embedder', 'gist'])
         assert exc_info.value.code == 2
         assert '--embedder' in capsys.readouterr().err
 

@@ -211,9 +211,9 @@ Examples:
         help='Maximum G/B value for red detection (default: 80)'
     )
     sync_parser.add_argument(
-        '--mode', choices=['catalyst', 'scene'], default='catalyst',
-        help='Alignment mode: catalyst (Garmin map dot) or scene '
-             '(camera-agnostic, requires scene extras) (default: catalyst)'
+        '--mode', choices=['catalyst', 'scene'], default='scene',
+        help='Alignment mode: scene (camera-agnostic, requires scene extras) '
+             'or catalyst (legacy Garmin map dot) (default: scene)'
     )
     sync_parser.add_argument(
         '--sample-hz', type=float, default=None,
@@ -311,9 +311,9 @@ Controls:
         help='Export diagnostic data to DIR (protobuf text format)'
     )
     debug_parser.add_argument(
-        '--mode', choices=['catalyst', 'scene'], default='catalyst',
-        help='Alignment mode: catalyst (Garmin map dot) or scene '
-             '(camera-agnostic, requires scene extras) (default: catalyst)'
+        '--mode', choices=['catalyst', 'scene'], default='scene',
+        help='Alignment mode: scene (camera-agnostic, requires scene extras) '
+             'or catalyst (legacy Garmin map dot) (default: scene)'
     )
     debug_parser.add_argument(
         '--sample-hz', type=float, default=None,
