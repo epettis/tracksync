@@ -126,10 +126,13 @@ def generate_comparison(
     # Stack videos vertically
     stacked = processor.stack_vertically(processed_target, processed_reference)
 
-    # Export with audio from reference
+    # Export with audio from the reference SEGMENT (unwarped), not the full
+    # reference clip: processed_reference is trimmed to [ref_start, ref_end],
+    # so its audio matches the output span. Passing the full clip would stretch
+    # the output to the untrimmed audio length and offset audio from video.
     output_filename = f"{target.driver}_v_{reference.driver}.mp4"
     output_path = str(output_dir / output_filename)
-    processor.export(stacked, output_path, audio_from=reference_clip)
+    processor.export(stacked, output_path, audio_from=processed_reference)
 
     # Clean up
     target_clip.close()

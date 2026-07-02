@@ -85,6 +85,12 @@ Options:
 - `--video-dir DIR` - Source video directory (default: current)
 - `--output-dir DIR` - Output video directory (default: current)
 
+Audio: the comparison video's audio comes from the *reference* (unwarped,
+second) video, trimmed to the synced span. The speed-warped target audio is
+never used, since time-scaling it would shift its pitch. If the reference
+video has no audio track, the output is intentionally silent (a warning is
+printed) — put the clip with usable audio second.
+
 ### Interactive debug mode (`debug`)
 
 Visualize the cross-correlation process for debugging alignment issues.
