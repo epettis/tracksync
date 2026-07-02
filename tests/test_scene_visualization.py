@@ -209,9 +209,9 @@ class TestDebugArgsValidation:
         parser = create_parser()
         return parser.parse_args(['debug', 'a.mp4', 'b.mp4'] + extra)
 
-    def test_mode_defaults_to_catalyst(self):
+    def test_mode_defaults_to_scene(self):
         args = self._parse([])
-        assert args.mode == 'catalyst'
+        assert args.mode == 'scene'
         assert args.sample_hz is None
         assert args.band_pct is None
         assert args.embedder is None
@@ -224,7 +224,7 @@ class TestDebugArgsValidation:
         ['--matcher', 'aliked-lightglue'],
     ])
     def test_catalyst_rejects_scene_only_flags(self, flag_args, capsys):
-        args = self._parse(flag_args)
+        args = self._parse(['--mode', 'catalyst'] + flag_args)
         with pytest.raises(SystemExit) as exc_info:
             validate_debug_args(args)
         assert exc_info.value.code == 2
@@ -241,7 +241,7 @@ class TestDebugArgsValidation:
         assert args.matcher is None  # Correspondences are opt-in
 
     def test_catalyst_without_scene_flags_is_noop(self):
-        args = self._parse([])
+        args = self._parse(['--mode', 'catalyst'])
         validate_debug_args(args)  # Must not raise
         assert args.mode == 'catalyst'
 
@@ -257,7 +257,7 @@ class TestDebugDispatch:
             lambda args: pytest.fail("scene debug taken in catalyst mode"),
         )
 
-        main(['debug', 'a.mp4', 'b.mp4'])
+        main(['debug', 'a.mp4', 'b.mp4', '--mode', 'catalyst'])
 
         assert len(calls) == 1
         assert calls[0].mode == 'catalyst'

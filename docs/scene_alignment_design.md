@@ -1,6 +1,7 @@
 # Design: Scene-Based Video Alignment
 
-Status: APPROVED — open questions resolved (see §11)
+Status: IMPLEMENTED — scene mode is the default alignment path as of T14
+(open questions resolved, see §11)
 Replaces: map-dot (red circle) cross-correlation as the alignment signal
 
 ## 1. Problem statement
@@ -246,7 +247,7 @@ assembly → `SyncPoint` list with per-segment speed ratios
 | New `tracksync/fine_align.py` | LightGlue matching, essential-matrix scoring, zero-crossing refinement |
 | `turn_analysis.py` | Trajectory-based apex detection loses its (x, y) input in scene mode; scene mode emits generic `sync_N` labels (decision §11.2). A yaw-rate proxy from epipolar rotation may restore named apex labels later (future work §10) |
 | `visualization.py` / `debug` CLI | New panels: cost matrix + DTW path heatmap; side-by-side matched frames with drawn correspondences; per-frame confidence trace |
-| `cli.py` | `sync --mode scene` vs. `--mode catalyst` (legacy). Catalyst remains the default until the regression harness (§8.3) demonstrates parity, then scene becomes default (decision §11.3). New flags: `--sample-hz`, `--band-pct`, `--min-inliers`, `--fov-deg`, `--matcher`, `--embedder` |
+| `cli.py` | `sync --mode scene` (default) vs. `--mode catalyst` (legacy map-dot); same for `debug` (decision §11.3). New flags: `--sample-hz`, `--band-pct`, `--min-inliers`, `--fov-deg`, `--matcher`, `--embedder` |
 | Protobuf diagnostics (`diagnose`) | Extend schema with embeddings/path for offline debugging |
 
 New dependencies: `torch` (MPS/CPU), `dinov2` weights via `torch.hub` or
@@ -342,10 +343,14 @@ method in §8.
 2. **Named apex labels: dropped for scene-mode v1.** Generic `sync_N`
    labels are used; a yaw-rate proxy may restore named apexes as future
    work (§10).
-3. **Default mode: Catalyst until efficacy is demonstrated.** Scene mode
-   ships behind `--mode scene`; it becomes the default once the regression
-   harness (§8.3) shows parity with the map-dot pipeline on Catalyst
-   footage.
+3. **Default mode: scene (as of T14).** Scene mode initially shipped behind
+   `--mode scene`; it is now the default, with `--mode catalyst` retained for
+   the legacy map-dot pipeline. The original hard parity gate (regression
+   harness p95 |Δt| ≤ 1 native frame vs. Catalyst) was relaxed: scene mode
+   trades absolute timing accuracy for camera-agnostic generalizability, so
+   acceptance is by visual review of the comparison video rather than
+   frame-exact parity with the track-specific Catalyst method. See §8.3 and
+   the T13 results in `scene_alignment_validation.md`.
 4. **No Torch-free scene mode.** Personal-project scope; Torch is an
    unconditional dependency of scene mode. Legacy Catalyst mode continues
    to work as-is.
