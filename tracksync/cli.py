@@ -36,7 +36,10 @@ from .cross_correlation import (
     output_tracksync_csv,
 )
 from .scene_align import (
+    _candidate_sync_times,
     coarse_align,
+    compute_scene_cost_matrix,
+    decode_native_window,
     extract_scene_features,
     generate_scene_sync_points,
 )
@@ -45,7 +48,11 @@ from .fine_align import make_matcher
 from .scene_deps import MissingSceneDependenciesError, require_scene_deps
 from .turn_analysis import compute_turn_analysis
 from .frame_analysis import interpolate_ocr_data, get_frame_at_time
-from .visualization import create_debug_display_v2, create_debug_display_from_diagnostic
+from .visualization import (
+    create_debug_display_v2,
+    create_debug_display_from_diagnostic,
+    create_scene_debug_display,
+)
 from .diagnostic_io import (
     export_diagnostic,
     import_diagnostic,
@@ -300,6 +307,30 @@ Controls:
         '--diagnose-output', metavar='DIR',
         help='Export diagnostic data to DIR (protobuf text format)'
     )
+    debug_parser.add_argument(
+        '--mode', choices=['catalyst', 'scene'], default='catalyst',
+        help='Alignment mode: catalyst (Garmin map dot) or scene '
+             '(camera-agnostic, requires scene extras) (default: catalyst)'
+    )
+    debug_parser.add_argument(
+        '--sample-hz', type=float, default=None,
+        help='[scene mode] Frame sampling rate in Hz (default: 10)'
+    )
+    debug_parser.add_argument(
+        '--band-pct', type=float, default=None,
+        help='[scene mode] DTW band as fraction of sequence length '
+             '(default: 0.10)'
+    )
+    debug_parser.add_argument(
+        '--embedder', default=None,
+        help='[scene mode] Frame embedder: dinov2-vitb14, dinov2-vits14, '
+             'or gist (default: dinov2-vitb14)'
+    )
+    debug_parser.add_argument(
+        '--matcher', default=None,
+        help='[scene mode] Optional feature matcher for drawing '
+             'correspondences at the cursor (default: off)'
+    )
 
     # 'diagnose' subcommand
     diagnose_parser = subparsers.add_parser(
@@ -372,7 +403,8 @@ def check_scene_deps(args: argparse.Namespace) -> None:
     embedder and test-only matchers do not, so they skip the check.
     """
     needs_torch = (
-        args.embedder.startswith('dinov2') or 'lightglue' in args.matcher
+        args.embedder.startswith('dinov2')
+        or 'lightglue' in (args.matcher or '')
     )
     if not needs_torch:
         return
@@ -381,6 +413,41 @@ def check_scene_deps(args: argparse.Namespace) -> None:
     except MissingSceneDependenciesError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(2)
+
+
+# Scene-only debug flags: (attribute name, CLI flag, scene-mode default).
+# --matcher stays None in scene mode: correspondence drawing is opt-in.
+_SCENE_ONLY_DEBUG_FLAGS = [
+    ('sample_hz', '--sample-hz', 10.0),
+    ('band_pct', '--band-pct', 0.10),
+    ('embedder', '--embedder', 'dinov2-vitb14'),
+    ('matcher', '--matcher', None),
+]
+
+
+def validate_debug_args(args: argparse.Namespace) -> None:
+    """Validate debug arguments across modes.
+
+    In catalyst mode, scene-only flags are rejected with a clear error
+    (exit code 2). In scene mode, unset scene-only flags receive their
+    defaults.
+    """
+    if args.mode == 'catalyst':
+        offending = [
+            flag for attr, flag, _ in _SCENE_ONLY_DEBUG_FLAGS
+            if getattr(args, attr) is not None
+        ]
+        if offending:
+            print(
+                f"Error: {', '.join(offending)} "
+                f"require{'s' if len(offending) == 1 else ''} --mode scene",
+                file=sys.stderr
+            )
+            sys.exit(2)
+    else:
+        for attr, _, default in _SCENE_ONLY_DEBUG_FLAGS:
+            if getattr(args, attr) is None and default is not None:
+                setattr(args, attr, default)
 
 
 def run_sync_mode(args: argparse.Namespace) -> SyncResult:
@@ -1050,6 +1117,114 @@ def run_debug_mode(args: argparse.Namespace) -> None:
     cv2.destroyAllWindows()
 
 
+def run_scene_debug_mode(args: argparse.Namespace) -> None:
+    """Run interactive scene-mode debug visualization.
+
+    Shows the DTW cost-matrix heatmap with path overlay, the frame pair at
+    the cursor (with feature correspondences when a matcher is selected),
+    and the per-frame confidence trace with sync points marked. Panel
+    rendering is done by pure functions in visualization.py; this loop only
+    computes alignment data and displays the composed image.
+    """
+    check_scene_deps(args)
+
+    print("=" * 60, file=sys.stderr)
+    print("SCENE-MODE DEBUG VISUALIZATION", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    embedder = make_embedder(args.embedder)
+    matcher = make_matcher(args.matcher) if args.matcher else None
+
+    same_file = os.path.realpath(args.video_a) == os.path.realpath(args.video_b)
+
+    print("\nPHASE 1: Extracting scene features", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    print(f"\nVideo A: {args.video_a}", file=sys.stderr)
+    feat_a = extract_scene_features(
+        args.video_a, embedder, sample_hz=args.sample_hz
+    )
+    if same_file:
+        print("\nVideo B: same as Video A (reusing extracted features)",
+              file=sys.stderr)
+        feat_b = feat_a
+    else:
+        print(f"\nVideo B: {args.video_b}", file=sys.stderr)
+        feat_b = extract_scene_features(
+            args.video_b, embedder, sample_hz=args.sample_hz
+        )
+
+    print("\nPHASE 2: Coarse alignment (DTW)", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    coarse = coarse_align(feat_a, feat_b, band_pct=args.band_pct)
+    cost = compute_scene_cost_matrix(feat_a, feat_b)
+    sync_times = _candidate_sync_times(coarse, max_sync_interval=3.0)
+
+    print(f"\nCoarse alignment: A [{coarse.trim_start_a:.2f}s, "
+          f"{coarse.trim_end_a:.2f}s] -> B [{coarse.trim_start_b:.2f}s, "
+          f"{coarse.trim_end_b:.2f}s]", file=sys.stderr)
+
+    print("\nPHASE 3: Interactive visualization", file=sys.stderr)
+    print("-" * 60, file=sys.stderr)
+
+    frame_times = feat_a.frame_times
+    total = len(frame_times)
+    samples_per_second = max(1, int(round(args.sample_hz)))
+
+    print("\nControls:", file=sys.stderr)
+    print("  Left/Right Arrow: Previous/next sample", file=sys.stderr)
+    print("  Up/Down Arrow: Jump 1 second", file=sys.stderr)
+    print("  ESC: Exit", file=sys.stderr)
+    print(file=sys.stderr)
+
+    current_idx = 0
+    while True:
+        t_a = float(frame_times[current_idx])
+        t_b = float(coarse.f(t_a))
+
+        frames_a, _ = decode_native_window(args.video_a, t_a, 0.0)
+        frames_b, _ = decode_native_window(args.video_b, t_b, 0.0)
+        frame_a = frames_a[0] if frames_a else None
+        frame_b = frames_b[0] if frames_b else None
+
+        pts_a = pts_b = None
+        if matcher is not None and frame_a is not None and frame_b is not None:
+            pts_a, pts_b = matcher.match(frame_a, frame_b)
+
+        display = create_scene_debug_display(
+            cost=cost,
+            path=coarse.path,
+            frame_times=frame_times,
+            margins=coarse.margins,
+            frame_a=frame_a,
+            frame_b=frame_b,
+            time_a=t_a,
+            time_b=t_b,
+            cursor_idx=current_idx,
+            total=total,
+            sync_times=sync_times,
+            pts_a=pts_a,
+            pts_b=pts_b,
+        )
+
+        cv2.imshow("Scene Alignment Debug", display)
+        key = cv2.waitKey(0) & 0xFF
+
+        if key == 27:  # ESC
+            break
+        elif key == 83 or key == 3:  # Right arrow - next sample
+            current_idx = min(current_idx + 1, total - 1)
+        elif key == 81 or key == 2:  # Left arrow - previous sample
+            current_idx = max(current_idx - 1, 0)
+        elif key == 82 or key == 0:  # Up arrow - jump forward 1 second
+            current_idx = min(current_idx + samples_per_second, total - 1)
+        elif key == 84 or key == 1:  # Down arrow - jump back 1 second
+            current_idx = max(current_idx - samples_per_second, 0)
+
+    cv2.destroyAllWindows()
+
+
 def run_generate_mode(args: argparse.Namespace) -> None:
     """Generate comparison videos from CSV timestamps."""
     csv_filename = Path(args.csv_file)
@@ -1211,7 +1386,11 @@ def main(argv: list = None) -> None:
     elif args.command == 'generate':
         run_generate_mode(args)
     elif args.command == 'debug':
-        run_debug_mode(args)
+        validate_debug_args(args)
+        if args.mode == 'scene':
+            run_scene_debug_mode(args)
+        else:
+            run_debug_mode(args)
     elif args.command == 'diagnose':
         run_diagnose_mode(args)
 

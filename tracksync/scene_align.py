@@ -123,6 +123,44 @@ class CoarseAlignment:
         return float(np.interp(t_a, self._frame_times_a, self.margins))
 
 
+def compute_scene_cost_matrix(
+    feat_a: SceneFeatures,
+    feat_b: SceneFeatures,
+) -> np.ndarray:
+    """Compute the cosine cost matrix between two videos' embeddings.
+
+    Embeddings are L2-normalized, so cosine similarity is a dot product and
+    cost = 1 - similarity, clipped to a valid finite range.
+
+    Args:
+        feat_a: Scene features for video A
+        feat_b: Scene features for video B
+
+    Returns:
+        Cost matrix [N_A, N_B] with values in [0, 2]
+
+    Design reference: docs/scene_alignment_design.md §4.4
+    """
+    # Use float64 for numerical stability and suppress overflow warnings
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=RuntimeWarning)
+        emb_a_64 = feat_a.emb_array.astype(np.float64)
+        emb_b_64 = feat_b.emb_array.astype(np.float64)
+        similarity = emb_a_64 @ emb_b_64.T  # [N_A, N_B]
+
+    # Clip to valid range for cosine similarity [-1, 1]
+    similarity = np.clip(similarity, -1.0, 1.0)
+    cost = 1.0 - similarity
+
+    # Ensure cost matrix is valid (no NaN/Inf)
+    if not np.all(np.isfinite(cost)):
+        # Replace invalid values with a high cost
+        cost = np.nan_to_num(cost, nan=2.0, posinf=2.0, neginf=0.0)
+
+    return cost
+
+
 def coarse_align(
     feat_a: SceneFeatures,
     feat_b: SceneFeatures,
@@ -147,23 +185,7 @@ def coarse_align(
     Design reference: docs/scene_alignment_design.md §4.4, task T7
     """
     # Step 1: Compute cosine cost matrix (1 - similarity)
-    # Embeddings are L2-normalized, so cosine similarity = dot product
-    # Use float64 for numerical stability and suppress overflow warnings
-    import warnings
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=RuntimeWarning)
-        emb_a_64 = feat_a.emb_array.astype(np.float64)
-        emb_b_64 = feat_b.emb_array.astype(np.float64)
-        similarity = emb_a_64 @ emb_b_64.T  # [N_A, N_B]
-
-    # Clip to valid range for cosine similarity [-1, 1]
-    similarity = np.clip(similarity, -1.0, 1.0)
-    cost = 1.0 - similarity
-
-    # Ensure cost matrix is valid (no NaN/Inf)
-    if not np.all(np.isfinite(cost)):
-        # Replace invalid values with a high cost
-        cost = np.nan_to_num(cost, nan=2.0, posinf=2.0, neginf=0.0)
+    cost = compute_scene_cost_matrix(feat_a, feat_b)
 
     # Step 2: Convert open_end_s to frames. Clamp the slack to a quarter of
     # the shorter sequence so it can never swallow the whole alignment

@@ -549,6 +549,335 @@ def create_debug_display_v2(
     return display
 
 
+# ---------------------------------------------------------------------------
+# Scene-mode debug panels (task T12, design §4.5)
+#
+# All render functions below are pure: they take numpy inputs and return BGR
+# uint8 images, so they can be tested headlessly. The interactive loop in
+# cli.py only displays their output.
+# ---------------------------------------------------------------------------
+
+# Plot-area margins for the cost-matrix panel: (left, right, top, bottom)
+COST_PANEL_MARGINS = (40, 10, 25, 20)
+
+_PATH_COLOR = (0, 255, 0)       # Green (BGR)
+_CURSOR_COLOR = (0, 100, 255)   # Orange (BGR)
+_SYNC_COLOR = (0, 255, 255)     # Yellow (BGR)
+_MATCH_LINE_COLOR = (255, 255, 0)  # Cyan (BGR)
+
+
+def cost_cell_to_pixel(
+    i: int, j: int, n_a: int, n_b: int, width: int, height: int
+) -> tuple[int, int]:
+    """Map a cost-matrix cell (i, j) to its pixel center in the panel.
+
+    The cost-matrix panel draws A indices along x and B indices along y
+    (increasing downward). This mapping is shared by the renderer and the
+    tests so path-overlay pixels can be verified deterministically.
+
+    Args:
+        i: A index (row of the cost matrix)
+        j: B index (column of the cost matrix)
+        n_a: Number of A frames (cost.shape[0])
+        n_b: Number of B frames (cost.shape[1])
+        width: Panel width in pixels
+        height: Panel height in pixels
+
+    Returns:
+        (x, y) pixel coordinates of the cell center
+    """
+    left, right, top, bottom = COST_PANEL_MARGINS
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+    x = left + int((i + 0.5) * plot_w / n_a)
+    y = top + int((j + 0.5) * plot_h / n_b)
+    return x, y
+
+
+def render_cost_matrix_panel(
+    cost: np.ndarray,
+    path: np.ndarray,
+    width: int,
+    height: int,
+    cursor_idx_a: Optional[int] = None,
+) -> np.ndarray:
+    """Render the DTW cost-matrix heatmap with the path overlaid.
+
+    Args:
+        cost: Cost matrix [N_A, N_B] (lower = more similar)
+        path: DTW path [K, 2] of (i, j) index pairs
+        width: Panel width in pixels
+        height: Panel height in pixels
+        cursor_idx_a: Optional A index to highlight with a vertical line
+
+    Returns:
+        BGR uint8 image [height, width, 3]
+    """
+    panel = np.zeros((height, width, 3), dtype=np.uint8)
+    panel[:] = (30, 30, 30)
+
+    n_a, n_b = cost.shape
+    left, right, top, bottom = COST_PANEL_MARGINS
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+
+    # Heatmap: normalize cost to 0..255, low cost bright. A on x, B on y.
+    cmin, cmax = float(np.min(cost)), float(np.max(cost))
+    if cmax > cmin:
+        norm = (1.0 - (cost - cmin) / (cmax - cmin)) * 255.0
+    else:
+        norm = np.full_like(cost, 128.0)
+    heat = norm.astype(np.uint8).T  # [N_B, N_A]: rows -> y, cols -> x
+    heat = cv2.resize(heat, (plot_w, plot_h), interpolation=cv2.INTER_NEAREST)
+    panel[top:top + plot_h, left:left + plot_w] = \
+        cv2.applyColorMap(heat, cv2.COLORMAP_VIRIDIS)
+
+    # Cursor column (drawn under the path so path pixels stay green)
+    if cursor_idx_a is not None and 0 <= cursor_idx_a < n_a:
+        x_cur, _ = cost_cell_to_pixel(cursor_idx_a, 0, n_a, n_b, width, height)
+        cv2.line(panel, (x_cur, top), (x_cur, top + plot_h - 1),
+                 _CURSOR_COLOR, 1)
+
+    # DTW path overlay
+    if len(path) > 0:
+        px = [cost_cell_to_pixel(int(i), int(j), n_a, n_b, width, height)
+              for i, j in path]
+        for p0, p1 in zip(px, px[1:]):
+            cv2.line(panel, p0, p1, _PATH_COLOR, 1)
+        for p in px:
+            cv2.circle(panel, p, 2, _PATH_COLOR, -1)
+
+    # Labels
+    cv2.putText(panel, "Cost matrix + DTW path (A: x, B: y)", (left, 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+    cv2.putText(panel, "0", (left - 15, top + 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    cv2.putText(panel, f"{n_b - 1}", (2, top + plot_h),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    cv2.putText(panel, f"{n_a - 1}", (width - right - 30, height - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+
+    return panel
+
+
+def render_frame_pair_panel(
+    frame_a: Optional[np.ndarray],
+    frame_b: Optional[np.ndarray],
+    time_a: float,
+    time_b: float,
+    pts_a: Optional[np.ndarray] = None,
+    pts_b: Optional[np.ndarray] = None,
+    max_frame_width: int = 640,
+) -> np.ndarray:
+    """Render side-by-side frames with feature correspondences drawn.
+
+    Args:
+        frame_a: RGB frame from video A, or None for a placeholder
+        frame_b: RGB frame from video B, or None for a placeholder
+        time_a: Timestamp of frame A (seconds)
+        time_b: Timestamp of frame B (seconds)
+        pts_a: Optional matched keypoints [M, 2] (x, y) in frame A coords
+        pts_b: Optional matched keypoints [M, 2] (x, y) in frame B coords
+        max_frame_width: Maximum displayed width per frame
+
+    Returns:
+        BGR uint8 image with both frames stacked horizontally
+    """
+    default_h, default_w = 480, 640
+
+    if frame_a is None:
+        frame_a = np.full((default_h, default_w, 3), 40, dtype=np.uint8)
+        cv2.putText(frame_a, "Video A: frame not available",
+                    (50, default_h // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
+
+    h, w = frame_a.shape[:2]
+    scale = min(1.0, max_frame_width / w)
+    new_w, new_h = int(w * scale), int(h * scale)
+
+    if frame_b is None:
+        frame_b = np.full((h, w, 3), 40, dtype=np.uint8)
+        cv2.putText(frame_b, "Video B: frame not available",
+                    (50, h // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
+
+    # Points in B are in original B coords; compute B's own scale
+    h_b, w_b = frame_b.shape[:2]
+    scale_b_x = new_w / w_b
+    scale_b_y = new_h / h_b
+
+    frame_a_bgr = cv2.cvtColor(cv2.resize(frame_a, (new_w, new_h)),
+                               cv2.COLOR_RGB2BGR)
+    frame_b_bgr = cv2.cvtColor(cv2.resize(frame_b, (new_w, new_h)),
+                               cv2.COLOR_RGB2BGR)
+
+    pair = np.hstack([frame_a_bgr, frame_b_bgr])
+
+    # Draw correspondences on the composite so lines can span both frames
+    n_matches = 0
+    if pts_a is not None and pts_b is not None and len(pts_a) > 0:
+        n_matches = len(pts_a)
+        for (xa, ya), (xb, yb) in zip(pts_a, pts_b):
+            pa = (int(xa * scale), int(ya * scale))
+            pb = (int(xb * scale_b_x) + new_w, int(yb * scale_b_y))
+            cv2.line(pair, pa, pb, _MATCH_LINE_COLOR, 1)
+            cv2.circle(pair, pa, 3, _PATH_COLOR, -1)
+            cv2.circle(pair, pb, 3, _PATH_COLOR, -1)
+
+    cv2.putText(pair, f"Video A: {time_a:.2f}s", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.putText(pair, f"Video B: {time_b:.2f}s", (new_w + 10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    if n_matches > 0:
+        cv2.putText(pair, f"Matches: {n_matches}", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, _MATCH_LINE_COLOR, 2)
+
+    return pair
+
+
+def render_margin_panel(
+    frame_times: np.ndarray,
+    margins: np.ndarray,
+    width: int,
+    height: int,
+    sync_times: Optional[list[float]] = None,
+    cursor_time: Optional[float] = None,
+) -> np.ndarray:
+    """Render the per-frame confidence (margin) trace with sync points marked.
+
+    Args:
+        frame_times: Timestamps in A [N] (seconds)
+        margins: Per-frame confidence margins [N] (higher = more confident)
+        width: Panel width in pixels
+        height: Panel height in pixels
+        sync_times: Optional sync point times in A, drawn as yellow lines
+        cursor_time: Optional current time in A, drawn as an orange line
+
+    Returns:
+        BGR uint8 image [height, width, 3]
+    """
+    panel = np.zeros((height, width, 3), dtype=np.uint8)
+    panel[:] = (30, 30, 30)
+
+    if len(frame_times) == 0:
+        cv2.putText(panel, "Confidence: no data", (10, height // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1)
+        return panel
+
+    left, right, top, bottom = 50, 10, 25, 20
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+
+    t_min, t_max = float(frame_times[0]), float(frame_times[-1])
+    t_range = t_max - t_min if t_max > t_min else 1.0
+    m_min, m_max = float(np.min(margins)), float(np.max(margins))
+    m_range = m_max - m_min if m_max > m_min else 1.0
+
+    def time_to_x(t: float) -> int:
+        return left + int((t - t_min) / t_range * plot_w)
+
+    def margin_to_y(m: float) -> int:
+        return top + plot_h - int((m - m_min) / m_range * plot_h)
+
+    # Grid lines
+    for k in range(5):
+        y = top + int(k * plot_h / 4)
+        cv2.line(panel, (left, y), (width - right, y), (50, 50, 50), 1)
+
+    # Sync point markers (under the trace)
+    for t in (sync_times or []):
+        x = time_to_x(t)
+        cv2.line(panel, (x, top), (x, top + plot_h), _SYNC_COLOR, 1)
+
+    # Cursor
+    if cursor_time is not None and t_min <= cursor_time <= t_max:
+        x = time_to_x(cursor_time)
+        cv2.line(panel, (x, top), (x, top + plot_h), _CURSOR_COLOR, 2)
+
+    # Margin trace
+    pts = [(time_to_x(float(t)), margin_to_y(float(m)))
+           for t, m in zip(frame_times, margins)]
+    for p0, p1 in zip(pts, pts[1:]):
+        cv2.line(panel, p0, p1, (100, 180, 100), 1)
+
+    # Labels
+    cv2.putText(panel, "Coarse confidence (margin)", (left, 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+    cv2.putText(panel, f"{m_max:.3f}", (2, top + 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    cv2.putText(panel, f"{m_min:.3f}", (2, top + plot_h),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    cv2.putText(panel, f"{t_min:.0f}s", (left, height - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    cv2.putText(panel, f"{t_max:.0f}s", (width - right - 40, height - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+
+    return panel
+
+
+def create_scene_debug_display(
+    cost: np.ndarray,
+    path: np.ndarray,
+    frame_times: np.ndarray,
+    margins: np.ndarray,
+    frame_a: Optional[np.ndarray],
+    frame_b: Optional[np.ndarray],
+    time_a: float,
+    time_b: float,
+    cursor_idx: int,
+    total: int,
+    sync_times: Optional[list[float]] = None,
+    pts_a: Optional[np.ndarray] = None,
+    pts_b: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Compose the full scene-mode debug display.
+
+    Stacks the frame-pair panel, cost-matrix panel, confidence panel, and an
+    info bar into a single BGR image for the interactive loop.
+
+    Args:
+        cost: Cost matrix [N_A, N_B]
+        path: DTW path [K, 2]
+        frame_times: Timestamps in A [N_A]
+        margins: Per-frame margins [N_A]
+        frame_a: RGB frame from A at the cursor, or None
+        frame_b: RGB frame from B at the coarse estimate, or None
+        time_a: Cursor time in A
+        time_b: Coarse-estimated time in B
+        cursor_idx: Cursor index into frame_times
+        total: Total number of A samples
+        sync_times: Optional sync point times in A
+        pts_a: Optional matched keypoints in frame A
+        pts_b: Optional matched keypoints in frame B
+
+    Returns:
+        BGR uint8 image
+    """
+    pair = render_frame_pair_panel(
+        frame_a, frame_b, time_a, time_b, pts_a=pts_a, pts_b=pts_b
+    )
+    width = pair.shape[1]
+
+    cost_panel = render_cost_matrix_panel(
+        cost, path, width, 300, cursor_idx_a=cursor_idx
+    )
+    margin_panel = render_margin_panel(
+        frame_times, margins, width, 120,
+        sync_times=sync_times, cursor_time=time_a,
+    )
+
+    info_bar = np.full((40, width, 3), 40, dtype=np.uint8)
+    info_text = (
+        f"Sample {cursor_idx + 1}/{total} | A: {time_a:.2f}s -> "
+        f"B: {time_b:.2f}s | Controls: <- -> (1 sample), up/down (1 sec), "
+        f"ESC (exit)"
+    )
+    cv2.putText(info_bar, info_text, (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+
+    return np.vstack([pair, cost_panel, margin_panel, info_bar])
+
+
 def create_debug_display_from_diagnostic(
     result: CrossCorrelationResult,
     frame_a: Optional[np.ndarray],
