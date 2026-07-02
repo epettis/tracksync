@@ -389,9 +389,13 @@ class TestMarkdownLog:
         assert lines[-1] == "| row2 |"
 
     def test_repo_template_matches_script_template(self):
-        """docs/scene_alignment_validation.md must match LOG_TEMPLATE."""
+        """docs/scene_alignment_validation.md must start with LOG_TEMPLATE.
+
+        Validation runs append result rows after the template, so only the
+        template prefix is compared.
+        """
         repo_log = SCRIPT_PATH.parent.parent / "docs" / "scene_alignment_validation.md"
-        assert repo_log.read_text() == vsa.LOG_TEMPLATE
+        assert repo_log.read_text().startswith(vsa.LOG_TEMPLATE)
 
 
 class TestMainSmoke:

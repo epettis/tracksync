@@ -132,12 +132,25 @@ def compute_scene_cost_matrix(
     Embeddings are L2-normalized, so cosine similarity is a dot product and
     cost = 1 - similarity, clipped to a valid finite range.
 
+    Raw cosine costs between forward-facing track frames are nearly constant
+    (embeddings of different track positions are ~99% similar), which leaves
+    the open-end DTW initialization underdetermined: with almost no contrast,
+    the path can enter at a wrong boundary correspondence and then ride the
+    slope constraint for many seconds to reach the true diagonal. To restore
+    contrast, each row is z-score normalized (centered on the row mean and
+    scaled by the row standard deviation), then shifted per row so each
+    row's minimum cost is zero. This preserves relative magnitudes (unlike
+    rank normalization), so genuinely ambiguous rows stay low-contrast and
+    continuity can govern them, and it keeps a self-alignment's diagonal at
+    exactly zero cost so the identity path stays exactly optimal. Scale-free,
+    so it applies uniformly across embedder backends.
+
     Args:
         feat_a: Scene features for video A
         feat_b: Scene features for video B
 
     Returns:
-        Cost matrix [N_A, N_B] with values in [0, 2]
+        Cost matrix [N_A, N_B], non-negative, in per-row z-score units
 
     Design reference: docs/scene_alignment_design.md §4.4
     """
@@ -157,6 +170,12 @@ def compute_scene_cost_matrix(
     if not np.all(np.isfinite(cost)):
         # Replace invalid values with a high cost
         cost = np.nan_to_num(cost, nan=2.0, posinf=2.0, neginf=0.0)
+
+    # Per-row z-score normalization with per-row zero minimum (see docstring)
+    mu = cost.mean(axis=1, keepdims=True)
+    sd = cost.std(axis=1, keepdims=True) + 1e-12
+    cost = (cost - mu) / sd
+    cost = cost - cost.min(axis=1, keepdims=True)
 
     return cost
 
