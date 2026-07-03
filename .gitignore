@@ -33,3 +33,9 @@ htmlcov/
 .vscode/
 *.swp
 *.swo
+
+# DTW-contrast experiment artifacts (raw cached data & logs; results JSON is kept)
+experiments/data/
+experiments/*.log
+samples/
+/failure.log

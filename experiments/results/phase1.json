@@ -1,0 +1,1298 @@
+[
+  {
+    "config": "baseline_main",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.025,
+    "boundary_speed_end": 0.7375000000000007,
+    "path_len": 821,
+    "contrast_row_entropy_mean": 6.684961246664169,
+    "contrast_row_entropy_norm": 0.9394819886997503,
+    "contrast_margin_mean": 0.25587189107813757,
+    "contrast_eff_rank": 43.63601983430921,
+    "contrast_top1_share": 0.3379232068983923,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.13911076996490102,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "plain_cost",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.025,
+    "boundary_speed_end": 0.7625000000000028,
+    "path_len": 823,
+    "contrast_row_entropy_mean": 7.115579831709877,
+    "contrast_row_entropy_norm": 0.9999996775422536,
+    "contrast_margin_mean": 0.0005281674410524113,
+    "contrast_eff_rank": 41.251212508546445,
+    "contrast_top1_share": 0.3939762107977322,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.14119410329823437,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "center",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.0,
+    "boundary_speed_end": 0.9500000000000064,
+    "path_len": 839,
+    "contrast_row_entropy_mean": 6.599295197513956,
+    "contrast_row_entropy_norm": 0.9274427700341443,
+    "contrast_margin_mean": 0.07328185491729627,
+    "contrast_eff_rank": 51.27300224188113,
+    "contrast_top1_share": 0.45200495761621406,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.12696474139526273,
+      "p95": 0.29701813645548697,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5692292630759261,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "whiten",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.9750000000000001,
+    "boundary_speed_end": 0.9500000000000064,
+    "path_len": 867,
+    "contrast_row_entropy_mean": 6.369556904524764,
+    "contrast_row_entropy_norm": 0.8951561223762129,
+    "contrast_margin_mean": 0.11038312968232401,
+    "contrast_eff_rank": 86.89677987577478,
+    "contrast_top1_share": 0.3759178459317856,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.3207340520405353,
+      "mean": 0.1362989487275498,
+      "p95": 0.29632653715809165,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5472678733919647,
+      "p95": 3.384270224756048,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "window5",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.8374999999999997,
+    "boundary_speed_end": 0.6875000000000036,
+    "path_len": 796,
+    "contrast_row_entropy_mean": 6.68734312947292,
+    "contrast_row_entropy_norm": 0.9398167305053415,
+    "contrast_margin_mean": 0.024546999430588932,
+    "contrast_eff_rank": 18.526555812362563,
+    "contrast_top1_share": 0.37395233580680154,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 4.027800693153292,
+      "mean": 0.5563571422262878,
+      "p95": 0.8296589261738041,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 4.06517666424277,
+      "mean": 1.5843806218249774,
+      "p95": 3.7445696739751666,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "window10",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.8999999999999999,
+    "boundary_speed_end": 0.5750000000000028,
+    "path_len": 786,
+    "contrast_row_entropy_mean": 6.691109015055189,
+    "contrast_row_entropy_norm": 0.9403459754097621,
+    "contrast_margin_mean": 0.012680331842598938,
+    "contrast_eff_rank": 14.656413429736762,
+    "contrast_top1_share": 0.39690863268854776,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 3.977800693153295,
+      "mean": 0.8136304309871724,
+      "p95": 1.8344318567570161,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 4.06517666424277,
+      "mean": 1.5537958278648816,
+      "p95": 3.7145696739751655,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "rowsoftmax_t0.05",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.025,
+    "boundary_speed_end": 0.7625000000000028,
+    "path_len": 823,
+    "contrast_row_entropy_mean": 7.114668723399062,
+    "contrast_row_entropy_norm": 0.999871633442044,
+    "contrast_margin_mean": 0.010563348821048127,
+    "contrast_eff_rank": 41.251212508548164,
+    "contrast_top1_share": 0.39397621079773215,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.14119410329823437,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "dualsoftmax_t0.05",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.9750000000000001,
+    "boundary_speed_end": 0.9750000000000085,
+    "path_len": 863,
+    "contrast_row_entropy_mean": 6.84409027880849,
+    "contrast_row_entropy_norm": 0.9618454481219593,
+    "contrast_margin_mean": 0.08862040110926238,
+    "contrast_eff_rank": 43.986370558143605,
+    "contrast_top1_share": 0.5696613283741655,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.13530369030894618,
+      "p95": 0.29786360654890687,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5521139425846253,
+      "p95": 3.384270224756048,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "rowsoftmax_t0.1",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.025,
+    "boundary_speed_end": 0.7625000000000028,
+    "path_len": 823,
+    "contrast_row_entropy_mean": 7.115353193803291,
+    "contrast_row_entropy_norm": 0.9999678266124818,
+    "contrast_margin_mean": 0.005281674410524068,
+    "contrast_eff_rank": 41.25121250854829,
+    "contrast_top1_share": 0.39397621079773215,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.14119410329823437,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "dualsoftmax_t0.1",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.0,
+    "boundary_speed_end": 0.9500000000000064,
+    "path_len": 852,
+    "contrast_row_entropy_mean": 7.097145363129565,
+    "contrast_row_entropy_norm": 0.9974089592772678,
+    "contrast_margin_mean": 0.018787414206235774,
+    "contrast_eff_rank": 43.58576615528828,
+    "contrast_top1_share": 0.5722000914668999,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.14530526803130636,
+      "p95": 0.3344318567570162,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.554610221370286,
+      "p95": 3.384270224756048,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "rowsoftmax_t0.2",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.025,
+    "boundary_speed_end": 0.7625000000000028,
+    "path_len": 823,
+    "contrast_row_entropy_mean": 7.115524821300903,
+    "contrast_row_entropy_norm": 0.9999919465642396,
+    "contrast_margin_mean": 0.002640837205262026,
+    "contrast_eff_rank": 41.25121250854879,
+    "contrast_top1_share": 0.39397621079773215,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.14119410329823437,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "dualsoftmax_t0.2",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.0,
+    "boundary_speed_end": 0.9500000000000064,
+    "path_len": 851,
+    "contrast_row_entropy_mean": 7.114222673287702,
+    "contrast_row_entropy_norm": 0.9998089470583511,
+    "contrast_margin_mean": 0.005361252506491623,
+    "contrast_eff_rank": 43.83727678794678,
+    "contrast_top1_share": 0.5619981597880368,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.151555268031306,
+      "p95": 0.3344318567570162,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.554610221370286,
+      "p95": 3.384270224756048,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "seqslam_R5_axisB",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      9.9,
+      130.1
+    ],
+    "boundary_speed_start": 0.8999999999999999,
+    "boundary_speed_end": 0.9750000000000014,
+    "path_len": 831,
+    "contrast_row_entropy_mean": 6.914084166785451,
+    "contrast_row_entropy_norm": 0.971682153922795,
+    "contrast_margin_mean": 0.07098538829156797,
+    "contrast_eff_rank": 363.47592866278217,
+    "contrast_top1_share": 0.4570154923553282,
+    "identity_dev": 0.024242424242430616,
+    "vs_catalyst": {
+      "max": 0.3207340520405353,
+      "mean": 0.10309525532171504,
+      "p95": 0.2658022616041696,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.765176664242773,
+      "mean": 1.613495807508098,
+      "p95": 3.6445696739751696,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "seqslam_R10_axisB",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.9000000000000001,
+    "boundary_speed_end": 0.9500000000000064,
+    "path_len": 833,
+    "contrast_row_entropy_mean": 6.916085487739823,
+    "contrast_row_entropy_norm": 0.971963412844255,
+    "contrast_margin_mean": 0.09183376941823071,
+    "contrast_eff_rank": 269.6962898573965,
+    "contrast_top1_share": 0.45875005661419865,
+    "identity_dev": 0.01717171717171695,
+    "vs_catalyst": {
+      "max": 0.297542329261006,
+      "mean": 0.11456492990186962,
+      "p95": 0.23956997053950813,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.765176664242773,
+      "mean": 1.6275673226110878,
+      "p95": 3.6445696739751696,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "seqslam_R20_axisB",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.8750000000000002,
+    "boundary_speed_end": 0.9500000000000064,
+    "path_len": 840,
+    "contrast_row_entropy_mean": 6.920562654088644,
+    "contrast_row_entropy_norm": 0.9725926187573378,
+    "contrast_margin_mean": 0.08831807460796594,
+    "contrast_eff_rank": 228.93881102213808,
+    "contrast_top1_share": 0.4675670821499936,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.3207340520405353,
+      "mean": 0.10893079318338968,
+      "p95": 0.28874274094230495,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5671197087945568,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "seqslam_R10_axisA",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.8
+    ],
+    "boundary_speed_start": 0.8750000000000002,
+    "boundary_speed_end": 1.0,
+    "path_len": 809,
+    "contrast_row_entropy_mean": 6.745178725309422,
+    "contrast_row_entropy_norm": 0.9479447507868691,
+    "contrast_margin_mean": 0.11485445460022943,
+    "contrast_eff_rank": 256.97878583291737,
+    "contrast_top1_share": 0.5345161646406418,
+    "identity_dev": 0.08434343434343816,
+    "vs_catalyst": {
+      "max": 0.3254036966709606,
+      "mean": 0.1293979519174712,
+      "p95": 0.31349140645319984,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.5651766642427702,
+      "mean": 1.584909670589409,
+      "p95": 3.4845696739751673,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "diagsmooth",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 1.05,
+    "boundary_speed_end": 0.7250000000000014,
+    "path_len": 897,
+    "contrast_row_entropy_mean": 7.115580196084473,
+    "contrast_row_entropy_norm": 0.9999997287502348,
+    "contrast_margin_mean": 9.668733670243029e-05,
+    "contrast_eff_rank": 59.085496414754076,
+    "contrast_top1_share": 0.4229787770006967,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.5207340520405381,
+      "mean": 0.13554827809519363,
+      "p95": 0.37708035417529806,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.6651766642427788,
+      "mean": 1.6092292630759257,
+      "p95": 3.564569673975174,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "steppen0.05",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.9750000000000001,
+    "boundary_speed_end": 0.7375000000000007,
+    "path_len": 840,
+    "contrast_row_entropy_mean": 6.684961246664169,
+    "contrast_row_entropy_norm": 0.9394819886997503,
+    "contrast_margin_mean": 0.25587189107813757,
+    "contrast_eff_rank": 43.63601983430921,
+    "contrast_top1_share": 0.3379232068983923,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.13952963327513182,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "steppen0.1",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.9750000000000001,
+    "boundary_speed_end": 0.7375000000000007,
+    "path_len": 864,
+    "contrast_row_entropy_mean": 6.684961246664169,
+    "contrast_row_entropy_norm": 0.9394819886997503,
+    "contrast_margin_mean": 0.25587189107813757,
+    "contrast_eff_rank": 43.63601983430921,
+    "contrast_top1_share": 0.3379232068983923,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.1369963423911197,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5692292630759266,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "steppen0.2",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.9000000000000001,
+    "boundary_speed_end": 0.7125000000000021,
+    "path_len": 934,
+    "contrast_row_entropy_mean": 6.684961246664169,
+    "contrast_row_entropy_norm": 0.9394819886997503,
+    "contrast_margin_mean": 0.25587189107813757,
+    "contrast_eff_rank": 43.63601983430921,
+    "contrast_top1_share": 0.3379232068983923,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.33943704857490786,
+      "mean": 0.1282926964868726,
+      "p95": 0.3239552313794668,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5492292630759263,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "slackpen0.5",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      132.4
+    ],
+    "boundary_speed_start": 1.025,
+    "boundary_speed_end": 0.8249999999999993,
+    "path_len": 841,
+    "contrast_row_entropy_mean": 6.684961246664169,
+    "contrast_row_entropy_norm": 0.9394819886997503,
+    "contrast_margin_mean": 0.25587189107813757,
+    "contrast_eff_rank": 43.63601983430921,
+    "contrast_top1_share": 0.3379232068983923,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.13911076996490102,
+      "p95": 0.38753194562521487,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "slackpen1.0",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      9.9,
+      133.9
+    ],
+    "boundary_speed_start": 0.9750000000000001,
+    "boundary_speed_end": 0.875,
+    "path_len": 854,
+    "contrast_row_entropy_mean": 6.684961246664169,
+    "contrast_row_entropy_norm": 0.9394819886997503,
+    "contrast_margin_mean": 0.25587189107813757,
+    "contrast_eff_rank": 43.63601983430921,
+    "contrast_top1_share": 0.3379232068983923,
+    "identity_dev": 0.10000000000000142,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.13960226657393812,
+      "p95": 0.38419515107995306,
+      "n": 25
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.5813890593191846,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "center+dualsoftmax_t0.1",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      133.20000000000002
+    ],
+    "boundary_speed_start": 0.9000000000000001,
+    "boundary_speed_end": 0.9874999999999972,
+    "path_len": 903,
+    "contrast_row_entropy_mean": 1.3151946638832117,
+    "contrast_row_entropy_norm": 0.18483303833195314,
+    "contrast_margin_mean": 0.13570137306825944,
+    "contrast_eff_rank": 73.16582824571007,
+    "contrast_top1_share": 0.46557513511795334,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.2911164762189955,
+      "mean": 0.10250014920117123,
+      "p95": 0.2298276847990941,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.570800839538047,
+      "p95": 3.39780319090213,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "center+steppen0.1",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      129.6
+    ],
+    "boundary_speed_start": 0.925,
+    "boundary_speed_end": 0.9500000000000064,
+    "path_len": 904,
+    "contrast_row_entropy_mean": 6.599295197513956,
+    "contrast_row_entropy_norm": 0.9274427700341443,
+    "contrast_margin_mean": 0.07328185491729627,
+    "contrast_eff_rank": 51.27300224188113,
+    "contrast_top1_share": 0.45200495761621406,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.4207340520405438,
+      "mean": 0.12568160180268007,
+      "p95": 0.3056129012685431,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.565646908730707,
+      "p95": 3.39780319090213,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "center+dualsoftmax+steppen0.1",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      133.20000000000002
+    ],
+    "boundary_speed_start": 0.9000000000000001,
+    "boundary_speed_end": 0.9874999999999972,
+    "path_len": 911,
+    "contrast_row_entropy_mean": 1.3151946638832117,
+    "contrast_row_entropy_norm": 0.18483303833195314,
+    "contrast_margin_mean": 0.13570137306825944,
+    "contrast_eff_rank": 73.16582824571007,
+    "contrast_top1_share": 0.46557513511795334,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 0.2911164762189955,
+      "mean": 0.10250014920117123,
+      "p95": 0.2298276847990941,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.570800839538047,
+      "p95": 3.39780319090213,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "center+window5+dualsoftmax",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      133.20000000000002
+    ],
+    "boundary_speed_start": 0.7499999999999998,
+    "boundary_speed_end": 0.9499999999999993,
+    "path_len": 880,
+    "contrast_row_entropy_mean": 2.4998885139436124,
+    "contrast_row_entropy_norm": 0.35132593083907143,
+    "contrast_margin_mean": 0.026729088181147095,
+    "contrast_eff_rank": 26.025210705290675,
+    "contrast_top1_share": 0.5217906401429997,
+    "identity_dev": 0.0,
+    "vs_catalyst": {
+      "max": 3.977800693153295,
+      "mean": 0.38572151139483474,
+      "p95": 0.7160831447633617,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.7622636588281893,
+      "mean": 1.6385034839701174,
+      "p95": 3.6154727865704612,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "center+seqslamR10+steppen0.1",
+    "pair": "buttonwillow_eddie_pb|buttonwillow_kurt_optimal",
+    "dom": [
+      10.0,
+      130.5
+    ],
+    "boundary_speed_start": 0.9000000000000001,
+    "boundary_speed_end": 0.9500000000000028,
+    "path_len": 838,
+    "contrast_row_entropy_mean": 6.801912740275997,
+    "contrast_row_entropy_norm": 0.955917958594815,
+    "contrast_margin_mean": 0.11823264692427772,
+    "contrast_eff_rank": 351.3131588052655,
+    "contrast_top1_share": 0.30700259490128384,
+    "identity_dev": 0.09898989898989896,
+    "vs_catalyst": {
+      "max": 0.34111647621899976,
+      "mean": 0.12614697499250416,
+      "p95": 0.3344318567570162,
+      "n": 24
+    },
+    "vs_ocr": {
+      "max": 3.465176664242776,
+      "mean": 1.569229263075928,
+      "p95": 3.4045696739751716,
+      "n": 5
+    },
+    "pair_label": "buttonwillow"
+  },
+  {
+    "config": "baseline_main",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.0
+    ],
+    "boundary_speed_start": 0.9124999999999996,
+    "boundary_speed_end": 1.1374999999999993,
+    "path_len": 665,
+    "contrast_row_entropy_mean": 6.374775422179527,
+    "contrast_row_entropy_norm": 0.9198153432706917,
+    "contrast_margin_mean": 0.342701913173237,
+    "contrast_eff_rank": 37.41112302479829,
+    "contrast_top1_share": 0.6993957253049752,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "plain_cost",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.0
+    ],
+    "boundary_speed_start": 1.0250000000000001,
+    "boundary_speed_end": 1.1374999999999993,
+    "path_len": 664,
+    "contrast_row_entropy_mean": 6.930490336519222,
+    "contrast_row_entropy_norm": 0.999999360877895,
+    "contrast_margin_mean": 0.0009483945051273809,
+    "contrast_eff_rank": 32.558695839220604,
+    "contrast_top1_share": 0.6308959231224274,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "center",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.10000000000001
+    ],
+    "boundary_speed_start": 0.9874999999999996,
+    "boundary_speed_end": 1.125,
+    "path_len": 672,
+    "contrast_row_entropy_mean": 6.1310691202441445,
+    "contrast_row_entropy_norm": 0.8846509992858046,
+    "contrast_margin_mean": 0.05944980757755853,
+    "contrast_eff_rank": 49.173764533510465,
+    "contrast_top1_share": 0.40813712975428634,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "whiten",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.0
+    ],
+    "boundary_speed_start": 1.05,
+    "boundary_speed_end": 1.1374999999999993,
+    "path_len": 700,
+    "contrast_row_entropy_mean": 5.8421574080081715,
+    "contrast_row_entropy_norm": 0.8429639737569278,
+    "contrast_margin_mean": 0.10863501548127776,
+    "contrast_eff_rank": 87.72196107251803,
+    "contrast_top1_share": 0.4088297366691355,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "window5",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.7
+    ],
+    "boundary_speed_start": 0.5,
+    "boundary_speed_end": 0.8000000000000007,
+    "path_len": 658,
+    "contrast_row_entropy_mean": 6.336271382855015,
+    "contrast_row_entropy_norm": 0.9142596014910895,
+    "contrast_margin_mean": 0.015218200415402925,
+    "contrast_eff_rank": 17.775837135535266,
+    "contrast_top1_share": 0.72742919112055,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "window10",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.7
+    ],
+    "boundary_speed_start": 0.5,
+    "boundary_speed_end": 0.75,
+    "path_len": 654,
+    "contrast_row_entropy_mean": 6.333017041628266,
+    "contrast_row_entropy_norm": 0.9137900331072077,
+    "contrast_margin_mean": 0.007250373719929773,
+    "contrast_eff_rank": 13.730949771022564,
+    "contrast_top1_share": 0.7538346098522354,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "rowsoftmax_t0.05",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.0
+    ],
+    "boundary_speed_start": 1.0250000000000001,
+    "boundary_speed_end": 1.1374999999999993,
+    "path_len": 664,
+    "contrast_row_entropy_mean": 6.928698742084038,
+    "contrast_row_entropy_norm": 0.9997408519985598,
+    "contrast_margin_mean": 0.018967890102547586,
+    "contrast_eff_rank": 32.5586958392212,
+    "contrast_top1_share": 0.6308959231224275,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "dualsoftmax_t0.05",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      104.0
+    ],
+    "boundary_speed_start": 1.0624999999999998,
+    "boundary_speed_end": 1.0249999999999986,
+    "path_len": 672,
+    "contrast_row_entropy_mean": 6.609140218065189,
+    "contrast_row_entropy_norm": 0.953631802816561,
+    "contrast_margin_mean": 0.12619313096935805,
+    "contrast_eff_rank": 38.0037574142319,
+    "contrast_top1_share": 0.7574013214136474,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "rowsoftmax_t0.1",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.0
+    ],
+    "boundary_speed_start": 1.0250000000000001,
+    "boundary_speed_end": 1.1374999999999993,
+    "path_len": 664,
+    "contrast_row_entropy_mean": 6.930048948924264,
+    "contrast_row_entropy_norm": 0.999935673131224,
+    "contrast_margin_mean": 0.009483945051273793,
+    "contrast_eff_rank": 32.5586958392212,
+    "contrast_top1_share": 0.6308959231224276,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "dualsoftmax_t0.1",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      107.60000000000001
+    ],
+    "boundary_speed_start": 1.0624999999999998,
+    "boundary_speed_end": 1.1124999999999972,
+    "path_len": 693,
+    "contrast_row_entropy_mean": 6.915392671565386,
+    "contrast_row_entropy_norm": 0.9978209211757242,
+    "contrast_margin_mean": 0.019762304189129325,
+    "contrast_eff_rank": 36.59443777418521,
+    "contrast_top1_share": 0.7854714107961227,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "rowsoftmax_t0.2",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.0
+    ],
+    "boundary_speed_start": 1.0250000000000001,
+    "boundary_speed_end": 1.1374999999999993,
+    "path_len": 664,
+    "contrast_row_entropy_mean": 6.930383710868894,
+    "contrast_row_entropy_norm": 0.9999839758795754,
+    "contrast_margin_mean": 0.00474197252563689,
+    "contrast_eff_rank": 32.55869583922147,
+    "contrast_top1_share": 0.6308959231224277,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "dualsoftmax_t0.2",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      107.60000000000001
+    ],
+    "boundary_speed_start": 1.05,
+    "boundary_speed_end": 1.1124999999999972,
+    "path_len": 696,
+    "contrast_row_entropy_mean": 6.929429156730876,
+    "contrast_row_entropy_norm": 0.9998462434130987,
+    "contrast_margin_mean": 0.006064506356674963,
+    "contrast_eff_rank": 37.04653896570393,
+    "contrast_top1_share": 0.7670574354829556,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "seqslam_R5_axisB",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.10000000000001
+    ],
+    "boundary_speed_start": 0.7874999999999996,
+    "boundary_speed_end": 1.0999999999999979,
+    "path_len": 676,
+    "contrast_row_entropy_mean": 6.778396918750702,
+    "contrast_row_entropy_norm": 0.9780538255438622,
+    "contrast_margin_mean": 0.08325688186718734,
+    "contrast_eff_rank": 304.53086187599,
+    "contrast_top1_share": 0.49902859852115017,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "seqslam_R10_axisB",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.10000000000001
+    ],
+    "boundary_speed_start": 1.0125,
+    "boundary_speed_end": 1.0874999999999986,
+    "path_len": 678,
+    "contrast_row_entropy_mean": 6.790456423917569,
+    "contrast_row_entropy_norm": 0.9797938896481039,
+    "contrast_margin_mean": 0.0925383932050171,
+    "contrast_eff_rank": 247.91278347320915,
+    "contrast_top1_share": 0.505947385318502,
+    "identity_dev": 0.07272727272727053,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "seqslam_R20_axisB",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.2
+    ],
+    "boundary_speed_start": 1.0125,
+    "boundary_speed_end": 1.0874999999999986,
+    "path_len": 691,
+    "contrast_row_entropy_mean": 6.781373506312857,
+    "contrast_row_entropy_norm": 0.9784833168951549,
+    "contrast_margin_mean": 0.08672753041399872,
+    "contrast_eff_rank": 204.72105816145552,
+    "contrast_top1_share": 0.5771699152365105,
+    "identity_dev": 0.08131313131313078,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "seqslam_R10_axisA",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      104.0
+    ],
+    "boundary_speed_start": 0.9749999999999999,
+    "boundary_speed_end": 0.9499999999999993,
+    "path_len": 632,
+    "contrast_row_entropy_mean": 6.604371777582794,
+    "contrast_row_entropy_norm": 0.9529437652891651,
+    "contrast_margin_mean": 0.13761759041334717,
+    "contrast_eff_rank": 200.2241651467687,
+    "contrast_top1_share": 0.6982729427756236,
+    "identity_dev": 0.09292929292929841,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "diagsmooth",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.10000000000001
+    ],
+    "boundary_speed_start": 0.4999999999999998,
+    "boundary_speed_end": 1.0249999999999986,
+    "path_len": 660,
+    "contrast_row_entropy_mean": 6.930490816385662,
+    "contrast_row_entropy_norm": 0.9999994301177481,
+    "contrast_margin_mean": 0.00011899094468970298,
+    "contrast_eff_rank": 32.536186144311685,
+    "contrast_top1_share": 0.651587878930235,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "steppen0.05",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.30000000000001
+    ],
+    "boundary_speed_start": 0.8124999999999998,
+    "boundary_speed_end": 1.0249999999999986,
+    "path_len": 670,
+    "contrast_row_entropy_mean": 6.374775422179527,
+    "contrast_row_entropy_norm": 0.9198153432706917,
+    "contrast_margin_mean": 0.342701913173237,
+    "contrast_eff_rank": 37.41112302479829,
+    "contrast_top1_share": 0.6993957253049752,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "steppen0.1",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.2
+    ],
+    "boundary_speed_start": 0.8124999999999998,
+    "boundary_speed_end": 1.0500000000000007,
+    "path_len": 679,
+    "contrast_row_entropy_mean": 6.374775422179527,
+    "contrast_row_entropy_norm": 0.9198153432706917,
+    "contrast_margin_mean": 0.342701913173237,
+    "contrast_eff_rank": 37.41112302479829,
+    "contrast_top1_share": 0.6993957253049752,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "steppen0.2",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.10000000000001
+    ],
+    "boundary_speed_start": 0.4999999999999998,
+    "boundary_speed_end": 1.0749999999999993,
+    "path_len": 704,
+    "contrast_row_entropy_mean": 6.374775422179527,
+    "contrast_row_entropy_norm": 0.9198153432706917,
+    "contrast_margin_mean": 0.342701913173237,
+    "contrast_eff_rank": 37.41112302479829,
+    "contrast_top1_share": 0.6993957253049752,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "slackpen0.5",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.9
+    ],
+    "boundary_speed_start": 0.9124999999999996,
+    "boundary_speed_end": 0.875,
+    "path_len": 668,
+    "contrast_row_entropy_mean": 6.374775422179527,
+    "contrast_row_entropy_norm": 0.9198153432706917,
+    "contrast_margin_mean": 0.342701913173237,
+    "contrast_eff_rank": 37.41112302479829,
+    "contrast_top1_share": 0.6993957253049752,
+    "identity_dev": 0.10000000000000142,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "slackpen1.0",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      9.9,
+      113.0
+    ],
+    "boundary_speed_start": 0.95,
+    "boundary_speed_end": 0.5,
+    "path_len": 682,
+    "contrast_row_entropy_mean": 6.374775422179527,
+    "contrast_row_entropy_norm": 0.9198153432706917,
+    "contrast_margin_mean": 0.342701913173237,
+    "contrast_eff_rank": 37.41112302479829,
+    "contrast_top1_share": 0.6993957253049752,
+    "identity_dev": 0.10000000000000142,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "center+dualsoftmax_t0.1",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.2
+    ],
+    "boundary_speed_start": 0.9624999999999997,
+    "boundary_speed_end": 1.0500000000000007,
+    "path_len": 709,
+    "contrast_row_entropy_mean": 1.4768437097568201,
+    "contrast_row_entropy_norm": 0.21309354665590527,
+    "contrast_margin_mean": 0.1781869219877286,
+    "contrast_eff_rank": 60.97148153213938,
+    "contrast_top1_share": 0.4375887468604462,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "center+steppen0.1",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.2
+    ],
+    "boundary_speed_start": 0.9874999999999996,
+    "boundary_speed_end": 1.0500000000000007,
+    "path_len": 695,
+    "contrast_row_entropy_mean": 6.1310691202441445,
+    "contrast_row_entropy_norm": 0.8846509992858046,
+    "contrast_margin_mean": 0.05944980757755853,
+    "contrast_eff_rank": 49.173764533510465,
+    "contrast_top1_share": 0.40813712975428634,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "center+dualsoftmax+steppen0.1",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.2
+    ],
+    "boundary_speed_start": 0.9624999999999997,
+    "boundary_speed_end": 1.0500000000000007,
+    "path_len": 717,
+    "contrast_row_entropy_mean": 1.4768437097568201,
+    "contrast_row_entropy_norm": 0.21309354665590527,
+    "contrast_margin_mean": 0.1781869219877286,
+    "contrast_eff_rank": 60.97148153213938,
+    "contrast_top1_share": 0.4375887468604462,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "center+window5+dualsoftmax",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      9.9,
+      108.10000000000001
+    ],
+    "boundary_speed_start": 0.95,
+    "boundary_speed_end": 1.0374999999999979,
+    "path_len": 720,
+    "contrast_row_entropy_mean": 2.2523934963221746,
+    "contrast_row_entropy_norm": 0.3249975034088203,
+    "contrast_margin_mean": 0.035026966716155634,
+    "contrast_eff_rank": 26.59668710558559,
+    "contrast_top1_share": 0.4596382262925611,
+    "identity_dev": 0.0,
+    "pair_label": "laguna"
+  },
+  {
+    "config": "center+seqslamR10+steppen0.1",
+    "pair": "laguna_eddie|laguna_kurt",
+    "dom": [
+      10.0,
+      108.30000000000001
+    ],
+    "boundary_speed_start": 0.9624999999999997,
+    "boundary_speed_end": 1.0249999999999986,
+    "path_len": 675,
+    "contrast_row_entropy_mean": 6.665652653642299,
+    "contrast_row_entropy_norm": 0.9617859732597371,
+    "contrast_margin_mean": 0.11693081261543112,
+    "contrast_eff_rank": 315.4613020146806,
+    "contrast_top1_share": 0.27434002313657174,
+    "identity_dev": 0.09848484848484418,
+    "pair_label": "laguna"
+  }
+]

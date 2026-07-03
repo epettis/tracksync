@@ -1,9 +1,35 @@
 # Research survey: approaches to the DTW cost-matrix contrast problem
 
-Status: SURVEY COMPLETE — literature reviewed, approaches ranked, experiment
-plan proposed. No implementation yet. Companion to
+Status: SURVEY COMPLETE, PLAN EXECUTED (one reference pair). Companion to
 `scene_alignment_dtw_contrast.md` (the open problem note); design context in
 `scene_alignment_design.md` §4.
+
+> **Outcomes (see `scene_alignment_dtw_contrast_experiments.md` for the data).**
+> Executed on the Buttonwillow reference pair, Fable-evaluated.
+> - §3 cost-matrix conditioning — **VALIDATED & PROMOTED.** Centering (item 1)
+>   + dual-softmax two-way contrast (item 3) fixed the boundary pathology (end
+>   speed 0.74→0.95) and cut scene-vs-Catalyst p95 (real pipeline 0.403→0.336;
+>   config-ranking harness 0.388→0.230); now in `compute_scene_cost_matrix`. DP
+>   penalties (item 2), window-averaging, and diagonal smoothing were dead ends.
+> - §2 descriptors — **TESTED, NO WIN.** VLAD-over-patch-tokens (item 5, AnyLoc
+>   recipe, k=32, ViT-B, subsampled tokens) lost to conditioned GeM
+>   (0.284 vs 0.197); helps only the unconditioned matrix. Weakened by
+>   underdetermined 24,576-dim whitening — inconclusive in principle,
+>   unnecessary in practice. AnyLoc's retrieval gains do not transfer when a
+>   DTW continuity prior already disambiguates.
+> - §4 motion — **TESTED, NO WIN (yaw); speed untested.** Yaw well-measured
+>   (cross-lap corr 0.71) but globally aliased (yaw-only p95 7.5 s); weighted-sum
+>   and entropy-gated fusion both tie-or-degrade appearance. The §4.3
+>   complementarity claim ("yaw at corners, appearance where scenery changes")
+>   is contradicted: corners have signal in *both* modalities, straights in
+>   *neither*. The §4.2 speed proxy was a broken measurement (ground ROI
+>   occluded), so speed-profile fusion is untested, not refuted.
+> - §5 fine stage — the remaining live direction. Coarse max error ~0.29 s sits
+>   inside the ±0.5 s fine window; per §7's Phase-4 rule, next invest in
+>   confidence-gated fine-stage windows, not more coarse-stage information.
+> - **Caveat:** n=1 reference pair; the feature-rich-with-references Phase-0
+>   prerequisite was never met. Do not generalize until more low-contrast pairs
+>   exist.
 
 ## 1. Problem recap and framing
 
