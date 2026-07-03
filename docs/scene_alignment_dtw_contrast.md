@@ -4,6 +4,10 @@ Status: OPEN — the fix currently on `main` is a stopgap; a dedicated study is
 planned. See §4.4 of `scene_alignment_design.md` for the coarse stage and
 `scene_alignment_validation.md` for the results referenced below.
 
+A literature survey of the research directions below, with ranked
+recommendations and a phased experiment plan, is in
+`scene_alignment_dtw_contrast_research.md`.
+
 ## Problem
 
 The scene coarse-alignment stage builds a cost matrix of `1 - cosine`
@@ -48,13 +52,16 @@ is a conditioning trick on a fundamentally low-information signal, not a cure.
 Scene mode is accepted on visual review rather than frame-parity (design doc
 §11.3).
 
-## Directions to research (not yet evaluated)
+## Directions to research
 
-- **Better descriptors for low-texture scenes:** VPR-specialized backbones
-  (MixVPR, CosPlace, AnyLoc recipes) or finer patch-token aggregation instead
-  of a single global vector per frame.
-- **Complementary non-appearance signals:** optical flow / motion, a
+Surveyed in `scene_alignment_dtw_contrast_research.md` (§ references below
+point there); none implemented yet.
+
+- **Better descriptors for low-texture scenes** (§2): VPR-specialized
+  backbones (MixVPR, CosPlace, AnyLoc recipes) or finer patch-token
+  aggregation instead of a single global vector per frame.
+- **Complementary non-appearance signals** (§4): optical flow / motion, a
   yaw-rate or curvature profile, horizon geometry.
-- **Cost-matrix conditioning** beyond per-row z-score.
+- **Cost-matrix conditioning** beyond per-row z-score (§3).
 - **Lean harder on the fine stage** where coarse contrast is inherently low
-  (note the LightGlue/MPS cost if the fine stage is expanded).
+  (note the LightGlue/MPS cost if the fine stage is expanded) (§5).
