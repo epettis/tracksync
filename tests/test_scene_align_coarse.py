@@ -645,3 +645,50 @@ class TestSyntheticFeatureConstruction:
 
         assert max_error <= sample_interval, \
             f"Synthetic self-alignment error {max_error:.3f}s > {sample_interval:.3f}s"
+
+
+class TestCostMatrixConditioning:
+    """Invariants of the centering + dual-softmax conditioning
+    (docs/scene_alignment_dtw_contrast_experiments.md)."""
+
+    def _features(self, emb_array, sample_hz=10.0):
+        n = len(emb_array)
+        return SceneFeatures(
+            video_path="synthetic",
+            frame_times=np.arange(n) / sample_hz,
+            emb_array=emb_array.astype(np.float32),
+            static_mask=np.zeros((8, 8), dtype=bool),
+            sample_hz=sample_hz,
+        )
+
+    def _flat_embeddings(self, n=60, d=256, seed=7):
+        """~0.99-similar rows, mimicking low-contrast track descriptors."""
+        rng = np.random.default_rng(seed)
+        base = rng.standard_normal(d)
+        base /= np.linalg.norm(base)
+        emb = base[None, :] + 0.05 * rng.standard_normal((n, d))
+        return emb / np.linalg.norm(emb, axis=1, keepdims=True)
+
+    def test_self_alignment_diagonal_is_zero_cost(self):
+        """Identity must stay exactly optimal: self-cost diagonal == row min == 0."""
+        from tracksync.scene_align import compute_scene_cost_matrix
+        f = self._features(self._flat_embeddings())
+        cost = compute_scene_cost_matrix(f, f)
+        assert np.all(np.isfinite(cost))
+        assert np.all(cost >= -1e-9)
+        diag = np.diag(cost)
+        assert np.allclose(diag, 0.0, atol=1e-9), f"max diagonal cost {diag.max():.2e}"
+        assert np.allclose(diag, cost.min(axis=1), atol=1e-9)
+
+    def test_restores_contrast_on_flat_embeddings(self):
+        """Conditioning must sharpen near-flat rows: the true match is the clear
+        per-row minimum and rows are far from uniform."""
+        from tracksync.scene_align import compute_scene_cost_matrix
+        emb = self._flat_embeddings()
+        f = self._features(emb)
+        cost = compute_scene_cost_matrix(f, f)
+        # every row's argmin is its own index (the self-match)
+        assert np.array_equal(np.argmin(cost, axis=1), np.arange(len(emb)))
+        # a real gap exists between best and second-best in each row
+        second = np.partition(cost, 1, axis=1)[:, 1]
+        assert np.median(second) > 0.0

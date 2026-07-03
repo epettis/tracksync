@@ -126,55 +126,79 @@ class CoarseAlignment:
 def compute_scene_cost_matrix(
     feat_a: SceneFeatures,
     feat_b: SceneFeatures,
+    softmax_temp: float = 0.1,
 ) -> np.ndarray:
-    """Compute the cosine cost matrix between two videos' embeddings.
-
-    Embeddings are L2-normalized, so cosine similarity is a dot product and
-    cost = 1 - similarity, clipped to a valid finite range.
+    """Compute a contrast-conditioned cost matrix between two videos' embeddings.
 
     Raw cosine costs between forward-facing track frames are nearly constant
     (embeddings of different track positions are ~99% similar), which leaves
     the open-end DTW initialization underdetermined: with almost no contrast,
     the path can enter at a wrong boundary correspondence and then ride the
-    slope constraint for many seconds to reach the true diagonal. To restore
-    contrast, each row is z-score normalized (centered on the row mean and
-    scaled by the row standard deviation), then shifted per row so each
-    row's minimum cost is zero. This preserves relative magnitudes (unlike
-    rank normalization), so genuinely ambiguous rows stay low-contrast and
-    continuity can govern them, and it keeps a self-alignment's diagonal at
-    exactly zero cost so the identity path stays exactly optimal. Scale-free,
-    so it applies uniformly across embedder backends.
+    slope constraint for many seconds to reach the true diagonal.
+
+    Two composed, complementary steps restore contrast (validated in
+    docs/scene_alignment_dtw_contrast_experiments.md, which cut scene-vs-Catalyst
+    p95 from 0.388 s to 0.230 s and removed the boundary-speed pathology):
+
+    1. **Per-pair centering.** Subtract the shared mean descriptor of both
+       videos and re-normalize. This removes the dominant "track appearance"
+       component that inflates every cosine toward 1.0 (the similarity matrix is
+       otherwise near rank-1), the root cause of the flat rows.
+    2. **Two-way (dual-softmax) contrast.** cost = -log(softmax_row .
+       softmax_col) of the similarity at temperature ``softmax_temp``. A cell is
+       cheap only when its frames are mutual best matches, so a B-frame that is
+       "everyone's 99% match" no longer attracts paths (the column axis, which a
+       one-way per-row z-score left unnormalized, is now balanced).
+
+    Both steps preserve the invariant that a self-alignment's diagonal is
+    exactly zero cost (identity stays optimal), and the row-min-zero shift keeps
+    genuinely ambiguous rows low-contrast so continuity can govern them.
+
+    Earlier revisions used a per-row z-score of (1 - cosine); it was superseded
+    because it left the column axis unnormalized and did not remove the shared
+    background component (on the study harness it was ~inert). ``softmax_temp``
+    is tuned for DINOv2-class cosine ranges; larger values soften contrast.
 
     Args:
         feat_a: Scene features for video A
         feat_b: Scene features for video B
+        softmax_temp: Dual-softmax temperature (default 0.1)
 
     Returns:
-        Cost matrix [N_A, N_B], non-negative, in per-row z-score units
+        Cost matrix [N_A, N_B], non-negative, per row shifted to a zero minimum
 
-    Design reference: docs/scene_alignment_design.md §4.4
+    Design reference: docs/scene_alignment_design.md §4.4;
+    docs/scene_alignment_dtw_contrast_experiments.md
     """
-    # Use float64 for numerical stability and suppress overflow warnings
     import warnings
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', category=RuntimeWarning)
         emb_a_64 = feat_a.emb_array.astype(np.float64)
         emb_b_64 = feat_b.emb_array.astype(np.float64)
-        similarity = emb_a_64 @ emb_b_64.T  # [N_A, N_B]
 
-    # Clip to valid range for cosine similarity [-1, 1]
-    similarity = np.clip(similarity, -1.0, 1.0)
-    cost = 1.0 - similarity
+        # Step 1: per-pair centering, then re-normalize to unit length.
+        mu = np.concatenate([emb_a_64, emb_b_64], axis=0).mean(axis=0, keepdims=True)
+        emb_a_64 = emb_a_64 - mu
+        emb_b_64 = emb_b_64 - mu
+        emb_a_64 /= np.maximum(np.linalg.norm(emb_a_64, axis=1, keepdims=True), 1e-12)
+        emb_b_64 /= np.maximum(np.linalg.norm(emb_b_64, axis=1, keepdims=True), 1e-12)
 
-    # Ensure cost matrix is valid (no NaN/Inf)
+        similarity = np.clip(emb_a_64 @ emb_b_64.T, -1.0, 1.0)  # [N_A, N_B]
+
+        # Step 2: two-way (dual-softmax) contrast at the given temperature.
+        z = similarity / softmax_temp
+        pr = np.exp(z - z.max(axis=1, keepdims=True))
+        pr /= pr.sum(axis=1, keepdims=True)
+        pc = np.exp(z - z.max(axis=0, keepdims=True))
+        pc /= pc.sum(axis=0, keepdims=True)
+        cost = -np.log(pr + 1e-30) - np.log(pc + 1e-30)
+
+    # Guard against any non-finite values before the row-min shift.
     if not np.all(np.isfinite(cost)):
-        # Replace invalid values with a high cost
-        cost = np.nan_to_num(cost, nan=2.0, posinf=2.0, neginf=0.0)
+        finite_max = np.max(cost[np.isfinite(cost)]) if np.any(np.isfinite(cost)) else 1.0
+        cost = np.nan_to_num(cost, nan=finite_max, posinf=finite_max, neginf=0.0)
 
-    # Per-row z-score normalization with per-row zero minimum (see docstring)
-    mu = cost.mean(axis=1, keepdims=True)
-    sd = cost.std(axis=1, keepdims=True) + 1e-12
-    cost = (cost - mu) / sd
+    # Shift each row so its minimum cost is zero (keeps identity at zero cost).
     cost = cost - cost.min(axis=1, keepdims=True)
 
     return cost
@@ -184,7 +208,7 @@ def coarse_align(
     feat_a: SceneFeatures,
     feat_b: SceneFeatures,
     band_pct: float = 0.10,
-    open_end_s: float = 10.0,
+    open_end_s: float = 5.0,
 ) -> CoarseAlignment:
     """Perform coarse alignment between two videos via DTW on embeddings.
 
@@ -192,11 +216,20 @@ def coarse_align(
     smooths the path into a continuous time-mapping function, and extracts trim
     boundaries from the path endpoints.
 
+    ``open_end_s`` is effectively the maximum footage trimmed from each clip
+    end: skipping low-contrast boundary frames is nearly free, so the open-end
+    DTW consumes close to the full slack. It was lowered from 10 s to 5 s
+    because 10 s over-trimmed ~4 s of real lap past the true start/finish
+    crossings on the reference pair (measured against Catalyst), while 5 s lands
+    on the crossings and recovers the boundary content; below ~3 s it begins to
+    include genuine non-lap pre/post-roll. See
+    docs/scene_alignment_dtw_contrast_experiments.md.
+
     Args:
         feat_a: Scene features for video A
         feat_b: Scene features for video B
         band_pct: Sakoe-Chiba band as fraction of sequence length (default 0.10)
-        open_end_s: Open-end slack in seconds at start/end (default 10.0)
+        open_end_s: Open-end slack in seconds at start/end (default 5.0)
 
     Returns:
         CoarseAlignment with smoothed mapping, path, margins, and trim times

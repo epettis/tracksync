@@ -1,0 +1,330 @@
+{
+  "common_domain": [
+    10.0,
+    129.6
+  ],
+  "n_common_catalyst": 24,
+  "ocr_pairs": [
+    [
+      20.82159796243258,
+      15.549644034929312
+    ],
+    [
+      62.83184128727823,
+      55.49154083709793
+    ],
+    [
+      80.38338059535164,
+      71.77528823848164
+    ],
+    [
+      93.59708699458542,
+      88.35935065341361
+    ],
+    [
+      97.36766483073042,
+      91.49597412826996
+    ]
+  ],
+  "rows": [
+    {
+      "config": "baseline_main",
+      "vs_catalyst_common": {
+        "max": 0.4207340520405438,
+        "mean": 0.13911076996490102,
+        "p95": 0.38753194562521487,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 1.025,
+      "boundary_speed_end": 0.7375000000000007,
+      "dom": [
+        10.0,
+        129.6
+      ],
+      "contrast": {
+        "row_entropy_mean": 6.684961246664169,
+        "row_entropy_norm": 0.9394819886997503,
+        "margin_mean": 0.11839868990817434,
+        "eff_rank": 43.63601983430921,
+        "top1_share": 0.3379232068983923
+      }
+    },
+    {
+      "config": "WINNER center+dualsoftmax_t0.1",
+      "vs_catalyst_common": {
+        "max": 0.2911164762189955,
+        "mean": 0.10250014920117123,
+        "p95": 0.2298276847990941,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9000000000000001,
+      "boundary_speed_end": 0.9874999999999972,
+      "dom": [
+        10.0,
+        133.20000000000002
+      ],
+      "contrast": {
+        "row_entropy_mean": 1.3151946638832117,
+        "row_entropy_norm": 0.18483303833195314,
+        "margin_mean": 1.3836756962755756,
+        "eff_rank": 73.16582824571007,
+        "top1_share": 0.46557513511795334
+      }
+    },
+    {
+      "config": "whiten+dualsoftmax_t0.1",
+      "vs_catalyst_common": {
+        "max": 0.2911164762189955,
+        "mean": 0.093054172187704,
+        "p95": 0.1970181364554798,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9000000000000001,
+      "boundary_speed_end": 1.0124999999999993,
+      "dom": [
+        10.0,
+        133.5
+      ],
+      "contrast": {
+        "row_entropy_mean": 0.9822322066772655,
+        "row_entropy_norm": 0.1380396135212569,
+        "margin_mean": 1.7353642309515058,
+        "eff_rank": 98.88008414544913,
+        "top1_share": 0.4248312229670736
+      }
+    },
+    {
+      "config": "whiten+dualsoftmax_t0.05",
+      "vs_catalyst_common": {
+        "max": 0.2911164762189955,
+        "mean": 0.09391471893129721,
+        "p95": 0.1970181364554798,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9000000000000001,
+      "boundary_speed_end": 1.0124999999999993,
+      "dom": [
+        10.0,
+        133.5
+      ],
+      "contrast": {
+        "row_entropy_mean": 0.3716642837702664,
+        "row_entropy_norm": 0.05223244945801247,
+        "margin_mean": 6.199798944390251,
+        "eff_rank": 353.2887417440851,
+        "top1_share": 0.7332643149741449
+      }
+    },
+    {
+      "config": "center+dualsoftmax_t0.05",
+      "vs_catalyst_common": {
+        "max": 0.35100026356681724,
+        "mean": 0.11694341778508337,
+        "p95": 0.2965784513047044,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.8999999999999999,
+      "boundary_speed_end": 0.8750000000000071,
+      "dom": [
+        10.0,
+        129.6
+      ],
+      "contrast": {
+        "row_entropy_mean": 0.4783699377469398,
+        "row_entropy_norm": 0.06722850348204094,
+        "margin_mean": 5.069733152797568,
+        "eff_rank": 240.79568809188655,
+        "top1_share": 0.811983862264415
+      }
+    },
+    {
+      "config": "center+dualsoftmax_t0.2",
+      "vs_catalyst_common": {
+        "max": 0.33943704857490786,
+        "mean": 0.12879297382168656,
+        "p95": 0.30382620908680197,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9000000000000001,
+      "boundary_speed_end": 0.9499999999999993,
+      "dom": [
+        10.0,
+        133.4
+      ],
+      "contrast": {
+        "row_entropy_mean": 3.790958514675388,
+        "row_entropy_norm": 0.532768570082992,
+        "margin_mean": 0.44321159621827405,
+        "eff_rank": 49.5142880444078,
+        "top1_share": 0.48633804177228646
+      }
+    },
+    {
+      "config": "center+ds+seqslamR10",
+      "vs_catalyst_common": {
+        "max": 0.297542329261006,
+        "mean": 0.10734326919624022,
+        "p95": 0.23766761181924884,
+        "n": 24
+      },
+      "identity_dev": 0.09848484848485839,
+      "boundary_speed_start": 0.9000000000000001,
+      "boundary_speed_end": 0.9500000000000064,
+      "dom": [
+        10.0,
+        129.6
+      ],
+      "contrast": {
+        "row_entropy_mean": 6.826462369313291,
+        "row_entropy_norm": 0.9593680809603422,
+        "margin_mean": 0.11261635906077813,
+        "eff_rank": 370.8921925514438,
+        "top1_share": 0.30912184987915037
+      }
+    },
+    {
+      "config": "delta5",
+      "vs_catalyst_common": {
+        "max": 0.29733699286306603,
+        "mean": 0.12296307427983266,
+        "p95": 0.2843310594556608,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9500000000000002,
+      "boundary_speed_end": 0.9624999999999986,
+      "dom": [
+        10.0,
+        129.6
+      ],
+      "contrast": {
+        "row_entropy_mean": 6.606471900514954,
+        "row_entropy_norm": 0.9284513597564931,
+        "margin_mean": 0.33689536357100086,
+        "eff_rank": 182.4521441539501,
+        "top1_share": 0.33610255963109714
+      }
+    },
+    {
+      "config": "center+delta5+dualsoftmax",
+      "vs_catalyst_common": {
+        "max": 0.2911164762189955,
+        "mean": 0.09859806090713404,
+        "p95": 0.1970181364554798,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.95,
+      "boundary_speed_end": 0.9624999999999986,
+      "dom": [
+        10.0,
+        130.3
+      ],
+      "contrast": {
+        "row_entropy_mean": 0.8708000425249384,
+        "row_entropy_norm": 0.12237931164064608,
+        "margin_mean": 2.0741794509662093,
+        "eff_rank": 205.72266559469873,
+        "top1_share": 0.39232961251570375
+      }
+    },
+    {
+      "config": "diagavg5",
+      "vs_catalyst_common": {
+        "max": 0.4249857553163565,
+        "mean": 0.13397998238429185,
+        "p95": 0.29640391536645544,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9624999999999999,
+      "boundary_speed_end": 1.0,
+      "dom": [
+        10.0,
+        133.20000000000002
+      ],
+      "contrast": {
+        "row_entropy_mean": 7.115580309624442,
+        "row_entropy_norm": 0.9999997447067606,
+        "margin_mean": 0.0001213068137988452,
+        "eff_rank": 35.55020659457887,
+        "top1_share": 0.559879652976751
+      }
+    },
+    {
+      "config": "center+diagavg5",
+      "vs_catalyst_common": {
+        "max": 0.4249857553163565,
+        "mean": 0.12169959096033363,
+        "p95": 0.2833645620723831,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9749999999999999,
+      "boundary_speed_end": 1.0,
+      "dom": [
+        10.0,
+        133.20000000000002
+      ],
+      "contrast": {
+        "row_entropy_mean": 7.106850424623891,
+        "row_entropy_norm": 0.9987728760056847,
+        "margin_mean": 0.010913771123568557,
+        "eff_rank": 40.243210666544144,
+        "top1_share": 0.6161049978939911
+      }
+    },
+    {
+      "config": "winner+slack0.25",
+      "vs_catalyst_common": {
+        "max": 0.2911164762189955,
+        "mean": 0.10250014920117123,
+        "p95": 0.2298276847990941,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.9000000000000001,
+      "boundary_speed_end": 1.0124999999999993,
+      "dom": [
+        10.0,
+        133.5
+      ],
+      "contrast": {
+        "row_entropy_mean": 1.3151946638832117,
+        "row_entropy_norm": 0.18483303833195314,
+        "margin_mean": 1.3836756962755756,
+        "eff_rank": 73.16582824571007,
+        "top1_share": 0.46557513511795334
+      }
+    },
+    {
+      "config": "winner+openend5",
+      "vs_catalyst_common": {
+        "max": 0.2911164762189955,
+        "mean": 0.10250014920117123,
+        "p95": 0.2298276847990941,
+        "n": 24
+      },
+      "identity_dev": 0.0,
+      "boundary_speed_start": 0.775,
+      "boundary_speed_end": 0.6749999999999972,
+      "dom": [
+        5.0,
+        134.6
+      ],
+      "contrast": {
+        "row_entropy_mean": 1.3151946638832117,
+        "row_entropy_norm": 0.18483303833195314,
+        "margin_mean": 1.3836756962755756,
+        "eff_rank": 73.16582824571007,
+        "top1_share": 0.46557513511795334
+      }
+    }
+  ]
+}
