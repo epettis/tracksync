@@ -202,6 +202,32 @@ window-averaging, diagonal smoothing, VLAD aggregation for alignment, and
 yaw/speed motion fusion. Revisit only with more low-contrast reference pairs or
 a materially better descriptor/backbone.
 
+## Follow-up: open-end over-trimming (default open_end_s 10 → 5)
+
+Visual review of the generated comparison videos showed the alignment is good
+through the middle but loses a few seconds of real lap at the start and finish.
+Cause: the comparison video spans only the DTW path endpoints, and the open-end
+DTW **always consumes the full `open_end_s` slack** — `trim_start` exactly
+equals `open_end_s` at 10/5/3/1 s — because skipping a boundary frame is nearly
+free while those low-contrast boundary frames are the hardest to match, so the
+path prefers to drop them. (This is a distinct mechanism from the boundary-speed
+pathology the conditioning fixed.)
+
+Measured against the Catalyst start/finish crossings (A[5.9, 133.7]):
+
+| open_end_s | trim (video A) | Catalyst pts covered | full-overlap p95 · max |
+|---|---|---|---|
+| 10 (old default) | A[10.0, 129.6] — over-trims ~4 s/end | 24/26 | 0.336 · 0.426 |
+| **5 (new default)** | A[5.0, 134.6] ≈ crossings | **26/26** | 0.432 · 0.501 |
+| 3 | A[3.0, 136.6] — into non-lap pre-roll | 26/26 | 1.10 · 1.60 |
+
+Lowered the `coarse_align` default to 5 s: it recovers the full lap and lands on
+the true crossings, at the cost of slightly looser alignment at the extreme ends
+(max |Δt| 0.43→0.50 s, still inside the fine stage's ±0.5 s window). The clips
+here carry only ~4–6 s of slack, so 5 s is the right budget; 3 s over-corrects.
+A proper self-adapting fix (stop skipping once a boundary frame has an
+acceptable in-band match, rather than skipping for free) is left as follow-up.
+
 ## Reproduce
 
 ```bash

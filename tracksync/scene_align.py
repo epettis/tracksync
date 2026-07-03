@@ -208,7 +208,7 @@ def coarse_align(
     feat_a: SceneFeatures,
     feat_b: SceneFeatures,
     band_pct: float = 0.10,
-    open_end_s: float = 10.0,
+    open_end_s: float = 5.0,
 ) -> CoarseAlignment:
     """Perform coarse alignment between two videos via DTW on embeddings.
 
@@ -216,11 +216,20 @@ def coarse_align(
     smooths the path into a continuous time-mapping function, and extracts trim
     boundaries from the path endpoints.
 
+    ``open_end_s`` is effectively the maximum footage trimmed from each clip
+    end: skipping low-contrast boundary frames is nearly free, so the open-end
+    DTW consumes close to the full slack. It was lowered from 10 s to 5 s
+    because 10 s over-trimmed ~4 s of real lap past the true start/finish
+    crossings on the reference pair (measured against Catalyst), while 5 s lands
+    on the crossings and recovers the boundary content; below ~3 s it begins to
+    include genuine non-lap pre/post-roll. See
+    docs/scene_alignment_dtw_contrast_experiments.md.
+
     Args:
         feat_a: Scene features for video A
         feat_b: Scene features for video B
         band_pct: Sakoe-Chiba band as fraction of sequence length (default 0.10)
-        open_end_s: Open-end slack in seconds at start/end (default 10.0)
+        open_end_s: Open-end slack in seconds at start/end (default 5.0)
 
     Returns:
         CoarseAlignment with smoothed mapping, path, margins, and trim times
