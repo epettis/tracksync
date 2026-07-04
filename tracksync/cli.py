@@ -195,6 +195,13 @@ Examples:
     )
     sync_parser.add_argument('--video-dir', help='Source video directory')
     sync_parser.add_argument(
+        '--overwrite', action='store_true',
+        help='[--all] Recompute pairs even if their sync CSV already exists. '
+             'By default an existing CSV is treated as a completed checkpoint '
+             'and the pair is skipped, so a crashed run can be resumed by '
+             'simply re-running the same command.'
+    )
+    sync_parser.add_argument(
         '--max-sync-interval', type=float, default=3.0,
         help='Maximum interval between sync points (default: 3.0)'
     )
@@ -831,6 +838,8 @@ def run_scene_sync_all_mode(
     results: dict[tuple[str, str], SyncResult] = {}
     driver_names = list(all_features.keys())
     pair_count = 0
+    skipped = 0
+    failed: list[tuple[str, str, str]] = []
     total_pairs = n_videos * (n_videos - 1)
 
     for driver_a in driver_names:
@@ -839,31 +848,57 @@ def run_scene_sync_all_mode(
                 continue
 
             pair_count += 1
-            print(f"\n[{pair_count}/{total_pairs}] {driver_a} vs {driver_b}",
-                  file=sys.stderr)
-
-            coarse = coarse_align(
-                all_features[driver_a], all_features[driver_b],
-                band_pct=args.band_pct
-            )
-            sync_result = generate_scene_sync_points(
-                coarse, driver_paths[driver_a], driver_paths[driver_b],
-                matcher,
-                max_sync_interval=args.max_sync_interval,
-                min_inliers=args.min_inliers,
-                fov_deg=args.fov_deg,
-            )
-            results[(driver_a, driver_b)] = sync_result
-
             csv_output_path = os.path.join(
                 output_dir, f"{driver_a}_v_{driver_b}_sync.csv"
             )
+
+            # Resume checkpoint: an existing CSV means this pair already
+            # completed on a prior run, so skip it unless --overwrite is set.
+            if not args.overwrite and os.path.exists(csv_output_path) \
+                    and os.path.getsize(csv_output_path) > 0:
+                skipped += 1
+                print(f"\n[{pair_count}/{total_pairs}] {driver_a} vs "
+                      f"{driver_b} -- skipping (CSV exists, resuming)",
+                      file=sys.stderr)
+                continue
+
+            print(f"\n[{pair_count}/{total_pairs}] {driver_a} vs {driver_b}",
+                  file=sys.stderr)
+
+            # Isolate per-pair failures: log and continue so one bad pair
+            # (or a transient error) does not throw away the whole run.
+            try:
+                coarse = coarse_align(
+                    all_features[driver_a], all_features[driver_b],
+                    band_pct=args.band_pct
+                )
+                sync_result = generate_scene_sync_points(
+                    coarse, driver_paths[driver_a], driver_paths[driver_b],
+                    matcher,
+                    max_sync_interval=args.max_sync_interval,
+                    min_inliers=args.min_inliers,
+                    fov_deg=args.fov_deg,
+                )
+            except Exception as e:  # noqa: BLE001 - keep batch alive
+                import traceback
+                failed.append((driver_a, driver_b, str(e)))
+                print(f"    ERROR: {driver_a} vs {driver_b} failed: {e}",
+                      file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                continue
+
+            results[(driver_a, driver_b)] = sync_result
+
+            # Write to a temp file then rename so an interrupted write never
+            # leaves a truncated CSV that a later resume would trust.
+            tmp_path = csv_output_path + ".tmp"
             output_tracksync_csv(
                 sync_result,
                 driver_paths[driver_a],
                 driver_paths[driver_b],
-                csv_output_path
+                tmp_path
             )
+            os.replace(tmp_path, csv_output_path)
 
     # Phase 3: Optionally generate videos
     if args.generate_video:
@@ -878,14 +913,21 @@ def run_scene_sync_all_mode(
         print(f"  Video source directory: {video_dir_path}", file=sys.stderr)
         print(f"  Video output directory: {output_dir_path}", file=sys.stderr)
 
-        for (driver_a, driver_b), sync_result in results.items():
+        # Iterate every ordered pair whose CSV exists on disk (not just the
+        # pairs computed this run) so --generate-video works on a resume too.
+        for driver_a in driver_names:
+          for driver_b in driver_names:
+            if driver_a == driver_b:
+                continue
+            csv_path = os.path.join(
+                output_dir, f"{driver_a}_v_{driver_b}_sync.csv"
+            )
+            if not os.path.exists(csv_path):
+                continue
             print(f"\n  Generating video: {driver_a} vs {driver_b}...",
                   file=sys.stderr)
 
             try:
-                csv_path = os.path.join(
-                    output_dir, f"{driver_a}_v_{driver_b}_sync.csv"
-                )
                 videos = read_csv(csv_path)
 
                 if len(videos) >= 2:
@@ -904,7 +946,13 @@ def run_scene_sync_all_mode(
 
     print("\n" + "=" * 60, file=sys.stderr)
     print("MULTI-VIDEO SYNCHRONIZATION COMPLETE", file=sys.stderr)
-    print(f"Generated {len(results)} pairwise sync results", file=sys.stderr)
+    print(f"Computed {len(results)} pair(s) this run; "
+          f"skipped {skipped} already-done pair(s).", file=sys.stderr)
+    if failed:
+        print(f"{len(failed)} pair(s) FAILED (not written; re-run to retry):",
+              file=sys.stderr)
+        for driver_a, driver_b, err in failed:
+            print(f"  - {driver_a} vs {driver_b}: {err}", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
     return results
