@@ -13,6 +13,10 @@ alignment work (see `docs/scene_alignment_design.md`).
 
 ## Installation
 
+> **On Windows?** See the dedicated [Windows setup & usage guide](docs/windows_setup.md)
+> for PowerShell activation and how to install a **GPU/CUDA** build of PyTorch.
+> The steps below are for **Linux/macOS**.
+
 ### Set up virtual environment
 
 ```bash
