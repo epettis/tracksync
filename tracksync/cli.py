@@ -67,6 +67,7 @@ def generate_comparison(
     video_dir: Path,
     output_dir: Path,
     processor: Optional[VideoProcessor] = None,
+    relative_timer: bool = True,
 ) -> str:
     """
     Generate a comparison video between target and reference.
@@ -125,6 +126,14 @@ def generate_comparison(
 
     # Stack videos vertically
     stacked = processor.stack_vertically(processed_target, processed_reference)
+
+    # Burn in the iRacing-style relative timer on the seam. Sync times are the
+    # clamped milestone timestamps, index-paired between target (top) and
+    # reference (bottom); the overlay derives the per-frame gap from them.
+    if relative_timer:
+        top_times = [seg.clamped_timestamp for seg in clamped_target]
+        bottom_times = [seg.clamped_timestamp for seg in clamped_reference]
+        stacked = processor.overlay_relative_timer(stacked, top_times, bottom_times)
 
     # Export with audio from the reference SEGMENT (unwarped), not the full
     # reference clip: processed_reference is trimmed to [ref_start, ref_end],
@@ -274,6 +283,10 @@ Examples:
     gen_parser.add_argument(
         '--output-dir', default='.',
         help='Output video directory (default: current)'
+    )
+    gen_parser.add_argument(
+        '--no-relative-timer', action='store_true',
+        help='Disable the iRacing-style relative timer overlay'
     )
 
     # 'debug' subcommand
@@ -1283,11 +1296,15 @@ def run_generate_mode(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
 
     videos = read_csv(str(csv_filename))
+    relative_timer = not getattr(args, 'no_relative_timer', False)
 
     for target in videos:
         for reference in videos:
             if target.driver != reference.driver:
-                output = generate_comparison(target, reference, video_dir, output_dir)
+                output = generate_comparison(
+                    target, reference, video_dir, output_dir,
+                    relative_timer=relative_timer,
+                )
                 print(f"Generated: {output}")
 
 

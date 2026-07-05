@@ -103,6 +103,56 @@ class VideoProcessor:
         """Stack two clips vertically (top over bottom)."""
         return clips_array([[top_clip], [bottom_clip]])
 
+    def overlay_relative_timer(
+        self,
+        clip: VideoClip,
+        sync_times_top: List[float],
+        sync_times_bottom: List[float],
+        fps: int = 30,
+    ) -> VideoClip:
+        """Burn an iRacing-style relative timer bar onto a stacked clip.
+
+        The bar sits on the seam between the two stacked videos and shows the
+        relative lap-time gap at the current track position (green = the bottom
+        car is ahead of the top lap, red = behind). The clamp is set to the
+        lap's maximum absolute delta so the bar uses its full travel.
+
+        Args:
+            clip: Stacked comparison clip (top over bottom).
+            sync_times_top: sync-point timestamps in the TOP (target) video.
+            sync_times_bottom: matching timestamps in the BOTTOM (reference).
+            fps: sampling rate used to find the lap's max delta for the clamp.
+
+        Returns:
+            A new clip with the overlay applied.
+        """
+        from .relative_timer import (
+            draw_relative_timer,
+            delta_series_from_sync_points,
+        )
+
+        top = np.asarray(sync_times_top, dtype=float)
+        bottom = np.asarray(sync_times_bottom, dtype=float)
+        duration = clip.duration
+        start_top, start_bot = float(top[0]), float(bottom[0])
+
+        # Clamp = max |delta| over the lap (dense sampling of the delta curve).
+        n = max(2, int(round(duration * fps)) + 1)
+        sample_t = np.linspace(0.0, duration, n)
+        _, clamp = delta_series_from_sync_points(top, bottom, sample_t)
+
+        def _delta(t: float) -> float:
+            tt = min(max(t, 0.0), duration)
+            return float(tt - (np.interp(start_bot + tt, bottom, top) - start_top))
+
+        def _overlay(get_frame, t):
+            # MoviePy frames are RGB.
+            return draw_relative_timer(
+                get_frame(t), _delta(t), clamp, frame_is_bgr=False
+            )
+
+        return clip.transform(_overlay)
+
     def export(
         self,
         clip: VideoFileClip,
