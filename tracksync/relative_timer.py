@@ -20,6 +20,7 @@ and the recommended clamp from a synchronized sync-point table.
 """
 from __future__ import annotations
 
+import os
 from typing import List, Sequence, Tuple
 
 import numpy as np
@@ -40,11 +41,29 @@ _GREEN = (60, 210, 90)
 _RED = (255, 96, 88)
 _YELLOW = (255, 216, 24)
 
-# Fonts are resolved lazily and cached by (path, size).
-_FONT_CANDIDATES = (
-    "/System/Library/Fonts/HelveticaNeue.ttc",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+# Windows keeps its fonts under %WINDIR%\Fonts (normally C:\Windows\Fonts, but
+# resolved from the env var so a non-standard install root still works).
+_WIN_FONTS = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+
+# Candidate faces per weight, each as (path, face_index). Spans macOS (incl. the
+# Supplemental/ location fonts moved to on newer versions), Windows (Segoe UI --
+# the Windows 11 default -- then Arial), and Linux, so the timer text renders
+# wherever the pipeline runs. Fonts are resolved lazily and cached by (size, bold).
+_FONT_CANDIDATES_BOLD = (
+    ("/System/Library/Fonts/HelveticaNeue.ttc", 1),   # .ttc index 1 = bold face
+    ("/System/Library/Fonts/Helvetica.ttc", 1),
+    ("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 0),
+    (os.path.join(_WIN_FONTS, "segoeuib.ttf"), 0),
+    (os.path.join(_WIN_FONTS, "arialbd.ttf"), 0),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 0),
+)
+_FONT_CANDIDATES_REGULAR = (
+    ("/System/Library/Fonts/HelveticaNeue.ttc", 0),
+    ("/System/Library/Fonts/Helvetica.ttc", 0),
+    ("/System/Library/Fonts/Supplemental/Arial.ttf", 0),
+    (os.path.join(_WIN_FONTS, "segoeui.ttf"), 0),
+    (os.path.join(_WIN_FONTS, "arial.ttf"), 0),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0),
 )
 _font_cache: dict = {}
 
@@ -53,16 +72,22 @@ def _font(size: int, bold: bool):
     key = (size, bold)
     if key in _font_cache:
         return _font_cache[key]
-    for path in _FONT_CANDIDATES:
+    candidates = _FONT_CANDIDATES_BOLD if bold else _FONT_CANDIDATES_REGULAR
+    for path, index in candidates:
         try:
-            # HelveticaNeue.ttc index 1 is the bold face.
-            idx = 1 if (bold and path.endswith(".ttc")) else 0
-            f = ImageFont.truetype(path, size, index=idx)
+            f = ImageFont.truetype(path, size, index=index)
             _font_cache[key] = f
             return f
         except (OSError, IOError):
             continue
-    f = ImageFont.load_default()
+    # Last resort: Pillow's bundled font, shipped inside the wheel on every OS.
+    # Pass the size so it stays readable -- a bare load_default() returns a
+    # fixed ~10px bitmap, which made the relative-timer number invisible when no
+    # system font resolved (as happened on Windows before Windows paths existed).
+    try:
+        f = ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10 has no size argument
+        f = ImageFont.load_default()
     _font_cache[key] = f
     return f
 

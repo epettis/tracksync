@@ -95,6 +95,59 @@ class TestDrawRelativeTimer:
         out = draw_relative_timer(frame, 0.0, 0.0)
         assert out.shape == frame.shape
 
+    def test_number_renders_when_no_system_font_resolves(self):
+        # Regression: when none of the candidate font paths exist, the fallback
+        # must still draw a readable (scaled) number, not a ~10px speck. We
+        # detect the yellow number glyphs directly in the widget bitmap.
+        import tracksync.relative_timer as rt
+
+        def _yellow_px(delta):
+            rt._font_cache.clear()
+            widget = np.asarray(rt._make_widget(delta, 1.0))
+            m = (
+                (widget[..., 0] > 200)
+                & (widget[..., 1] > 150)
+                & (widget[..., 2] < 120)
+                & (widget[..., 3] > 128)
+            )
+            return int(m.sum())
+
+        saved = (rt._FONT_CANDIDATES_BOLD, rt._FONT_CANDIDATES_REGULAR)
+        try:
+            rt._FONT_CANDIDATES_BOLD = ()
+            rt._FONT_CANDIDATES_REGULAR = ()
+            fallback_px = _yellow_px(0.34)
+        finally:
+            rt._FONT_CANDIDATES_BOLD, rt._FONT_CANDIDATES_REGULAR = saved
+            rt._font_cache.clear()
+        # A real, readable number is hundreds+ of pixels; the old tiny default
+        # produced only a couple dozen.
+        assert fallback_px > 500
+
+
+class TestFontResolution:
+    def test_segoe_ui_present_for_both_weights(self):
+        import tracksync.relative_timer as rt
+
+        bold = [p for p, _ in rt._FONT_CANDIDATES_BOLD]
+        regular = [p for p, _ in rt._FONT_CANDIDATES_REGULAR]
+        assert any(p.endswith("segoeuib.ttf") for p in bold)
+        assert any(p.endswith("segoeui.ttf") for p in regular)
+        assert any(p.endswith("arialbd.ttf") for p in bold)
+
+    def test_windows_font_dir_respects_windir_env(self, monkeypatch):
+        import importlib
+        import tracksync.relative_timer as rt
+
+        monkeypatch.setenv("WINDIR", r"D:\CustomWin")
+        importlib.reload(rt)
+        try:
+            assert rt._WIN_FONTS.startswith(r"D:\CustomWin")
+            assert any(r"D:\CustomWin" in p for p, _ in rt._FONT_CANDIDATES_BOLD)
+        finally:
+            monkeypatch.delenv("WINDIR", raising=False)
+            importlib.reload(rt)
+
 
 class TestVideoProcessorWiring:
     def test_overlay_applies_to_clip(self):
